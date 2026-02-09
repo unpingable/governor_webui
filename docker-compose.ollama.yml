@@ -1,0 +1,40 @@
+# Agent Governor WebUI — Ollama Override
+#
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
+#
+# Adds local Ollama backend and switches adapters to use it instead of Anthropic.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: governor-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # GPU support (uncomment for NVIDIA)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  fiction-adapter:
+    environment:
+      - BACKEND_TYPE=ollama
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
+
+  code-adapter:
+    environment:
+      - BACKEND_TYPE=ollama
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_data:

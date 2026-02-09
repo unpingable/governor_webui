@@ -1,0 +1,1582 @@
+"""Tests for the WebUI adapter (FastAPI endpoints)."""
+
+import json
+import os
+import pytest
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from governor.chat_bridge import ChatResponse as BridgeChatResponse
+from governor.context_manager import GovernorContextManager
+
+
+# ============================================================================
+# Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def tmp_contexts_dir(tmp_path: Path) -> Path:
+    """Temporary directory for governor contexts."""
+    return tmp_path / "contexts"
+
+
+@pytest.fixture
+def mock_env(tmp_contexts_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set environment variables for adapter configuration."""
+    monkeypatch.setenv("BACKEND_TYPE", "ollama")
+    monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
+    monkeypatch.setenv("GOVERNOR_CONTEXT_ID", "test-context")
+    monkeypatch.setenv("GOVERNOR_MODE", "general")
+    monkeypatch.setenv("GOVERNOR_CONTEXTS_DIR", str(tmp_contexts_dir))
+
+
+@pytest.fixture
+def reset_adapter_globals() -> None:
+    """Reset module-level globals between tests."""
+    import gov_webui.adapter as adapter_mod
+    adapter_mod._bridge = None
+    adapter_mod._context_manager = None
+    adapter_mod._session_store = None
+    yield
+    adapter_mod._bridge = None
+    adapter_mod._context_manager = None
+    adapter_mod._session_store = None
+
+
+@pytest.fixture
+def app(mock_env, reset_adapter_globals):
+    """Get the FastAPI app with test config."""
+    # Re-import to pick up environment changes
+    import importlib
+    import gov_webui.adapter as adapter_mod
+    importlib.reload(adapter_mod)
+    return adapter_mod.app
+
+
+@pytest.fixture
+def client(app):
+    """Create a test client."""
+    from fastapi.testclient import TestClient
+    return TestClient(app)
+
+
+# ============================================================================
+# TestRootEndpoint
+# ============================================================================
+
+
+class TestRootEndpoint:
+    """Tests for GET / (serves combined UI) and GET /api/info."""
+
+    def test_root_returns_html(self, client) -> None:
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
+        assert "Governor Chat" in response.text
+
+    def test_root_contains_chat_and_governor(self, client) -> None:
+        response = client.get("/")
+        body = response.text
+        assert "chat-panel" in body
+        assert "governor-panel" in body
+        assert "model-select" in body
+
+    def test_api_info_returns_json(self, client) -> None:
+        response = client.get("/api/info")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "Governor Chat Adapter"
+        assert data["openai_compatible"] is True
+
+    def test_api_info_includes_version(self, client) -> None:
+        response = client.get("/api/info")
+        data = response.json()
+        assert "version" in data
+        assert data["version"] == "0.3.0"
+
+    def test_api_info_includes_endpoints(self, client) -> None:
+        response = client.get("/api/info")
+        data = response.json()
+        assert "endpoints" in data
+        assert "/v1/models" in data["endpoints"].values()
+        assert "/v1/chat/completions" in data["endpoints"].values()
+
+
+# ============================================================================
+# TestHealthEndpoint
+# ============================================================================
+
+
+class TestHealthEndpoint:
+    """Tests for GET /health."""
+
+    def test_health_degraded_when_backend_down(self, client) -> None:
+        """Health returns degraded when backend is unreachable."""
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        # Backend is not running so should be degraded
+        assert data["status"] == "degraded"
+        assert data["backend"]["connected"] is False
+
+    def test_health_includes_governor_info(self, client) -> None:
+        response = client.get("/health")
+        data = response.json()
+        assert "governor" in data
+        assert "context_id" in data["governor"]
+        assert "mode" in data["governor"]
+
+    def test_health_includes_backend_type(self, client) -> None:
+        response = client.get("/health")
+        data = response.json()
+        assert data["backend"]["type"] == "ollama"
+
+
+# ============================================================================
+# TestModelsEndpoint
+# ============================================================================
+
+
+class TestModelsEndpoint:
+    """Tests for GET /v1/models."""
+
+    def test_models_format(self, client) -> None:
+        """Models endpoint returns correct format even on error."""
+        # Backend is down, so this will raise 502
+        response = client.get("/v1/models")
+        # Could be 502 (backend down) or 200 (mocked)
+        assert response.status_code in (200, 502)
+
+    def test_get_model_by_id(self, client) -> None:
+        response = client.get("/v1/models/test-model")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == "test-model"
+        assert data["object"] == "model"
+
+
+# ============================================================================
+# TestChatEndpoint
+# ============================================================================
+
+
+class TestChatEndpoint:
+    """Tests for POST /v1/chat/completions."""
+
+    def test_non_streaming_response_format(self, client, monkeypatch) -> None:
+        """Non-streaming response has correct OpenAI format."""
+        import gov_webui.adapter as adapter_mod
+
+        mock_bridge = AsyncMock()
+        mock_bridge.chat.return_value = BridgeChatResponse(
+            content="Hello from test", model="test-model",
+            usage={"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        )
+        mock_bridge.list_models = AsyncMock(return_value=[])
+
+        # Inject mock bridge
+        adapter_mod._bridge = mock_bridge
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["object"] == "chat.completion"
+        assert data["model"] == "test-model"
+        assert len(data["choices"]) == 1
+        assert data["choices"][0]["message"]["content"] == "Hello from test"
+        assert data["choices"][0]["message"]["role"] == "assistant"
+        assert data["usage"]["total_tokens"] == 8
+
+    def test_error_handling(self, client, monkeypatch) -> None:
+        """Backend errors return 502."""
+        import gov_webui.adapter as adapter_mod
+
+        mock_bridge = AsyncMock()
+        mock_bridge.chat.side_effect = Exception("Connection refused")
+        adapter_mod._bridge = mock_bridge
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 502
+
+    def test_empty_messages(self, client, monkeypatch) -> None:
+        """Empty messages list is handled."""
+        import gov_webui.adapter as adapter_mod
+
+        mock_bridge = AsyncMock()
+        mock_bridge.chat.return_value = BridgeChatResponse(
+            content="OK", model="m"
+        )
+        adapter_mod._bridge = mock_bridge
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+
+    def test_max_tokens_passthrough(self, client, monkeypatch) -> None:
+        """max_tokens is passed through to backend."""
+        import gov_webui.adapter as adapter_mod
+
+        mock_bridge = AsyncMock()
+        mock_bridge.chat.return_value = BridgeChatResponse(
+            content="OK", model="m"
+        )
+        adapter_mod._bridge = mock_bridge
+
+        client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 100,
+                "stream": False,
+            },
+        )
+        call_kwargs = mock_bridge.chat.call_args[1]
+        assert call_kwargs.get("max_tokens") == 100
+
+    def test_model_passthrough(self, client, monkeypatch) -> None:
+        """Model name is passed through correctly."""
+        import gov_webui.adapter as adapter_mod
+
+        mock_bridge = AsyncMock()
+        mock_bridge.chat.return_value = BridgeChatResponse(
+            content="OK", model="custom-model"
+        )
+        adapter_mod._bridge = mock_bridge
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "custom-model",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+            },
+        )
+        data = response.json()
+        assert data["model"] == "custom-model"
+
+
+# ============================================================================
+# TestGovernorEndpoints
+# ============================================================================
+
+
+class TestGovernorEndpoints:
+    """Tests for governor-specific endpoints."""
+
+    def test_contexts_list(self, client, tmp_contexts_dir) -> None:
+        """GET /governor/contexts returns context list."""
+        # Create a context manually
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-ctx-1", mode="fiction")
+
+        # Need to inject this context manager
+        import gov_webui.adapter as adapter_mod
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/contexts")
+        assert response.status_code == 200
+        data = response.json()
+        assert "contexts" in data
+        assert "active_context_id" in data
+        assert len(data["contexts"]) == 1
+        assert data["contexts"][0]["context_id"] == "test-ctx-1"
+
+    def test_status_uninitialized(self, client) -> None:
+        """GET /governor/status when context doesn't exist."""
+        response = client.get("/governor/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["initialized"] is False
+
+    def test_status_with_fiction_context(self, client, tmp_contexts_dir) -> None:
+        """GET /governor/status with fiction context."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["initialized"] is True
+        assert data["mode"] == "fiction"
+        assert data["has_fiction_governor"] is True
+        assert data["has_governor"] is True
+
+    def test_status_with_code_context(self, client, tmp_contexts_dir) -> None:
+        """GET /governor/status with code context."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["initialized"] is True
+        assert data["mode"] == "code"
+        assert data["has_fiction_governor"] is False
+
+
+# ============================================================================
+# TestBackendSelection
+# ============================================================================
+
+
+class TestBackendEndpoints:
+    """Tests for GET /v1/backends and POST /v1/backends/switch."""
+
+    def test_list_backends_returns_list(self, client) -> None:
+        """GET /v1/backends returns a list of backend entries."""
+        response = client.get("/v1/backends")
+        assert response.status_code == 200
+        data = response.json()
+        assert "backends" in data
+        assert isinstance(data["backends"], list)
+        assert len(data["backends"]) >= 1
+
+    def test_list_backends_has_ollama(self, client) -> None:
+        """Ollama is always present in the backends list."""
+        response = client.get("/v1/backends")
+        types = [b["type"] for b in response.json()["backends"]]
+        assert "ollama" in types
+
+    def test_list_backends_marks_active(self, client) -> None:
+        """Exactly one backend is marked active."""
+        response = client.get("/v1/backends")
+        data = response.json()
+        active_list = [b for b in data["backends"] if b.get("active")]
+        assert len(active_list) == 1
+        assert data["active"] == active_list[0]["type"]
+
+    def test_switch_invalid_type(self, client) -> None:
+        """POST /v1/backends/switch with invalid type returns 400."""
+        response = client.post(
+            "/v1/backends/switch",
+            json={"backend_type": "nonexistent"},
+        )
+        assert response.status_code == 400
+
+    def test_switch_to_same_backend(self, client) -> None:
+        """Switching to the same backend type succeeds."""
+        response = client.post(
+            "/v1/backends/switch",
+            json={"backend_type": "ollama"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["backend_type"] == "ollama"
+
+    def test_api_info_reflects_current_backend(self, client) -> None:
+        """After switch, /api/info reflects the new backend type."""
+        import gov_webui.adapter as adapter_mod
+        adapter_mod._current_backend_type = "ollama"
+
+        info = client.get("/api/info").json()
+        assert info["backend"] == "ollama"
+
+
+class TestBackendSelection:
+    """Tests for backend type selection."""
+
+    def test_default_is_ollama(self, monkeypatch, tmp_contexts_dir) -> None:
+        """Default backend type is ollama."""
+        monkeypatch.setenv("GOVERNOR_CONTEXTS_DIR", str(tmp_contexts_dir))
+        monkeypatch.delenv("BACKEND_TYPE", raising=False)
+
+        import importlib
+        import gov_webui.adapter as adapter_mod
+        adapter_mod._bridge = None
+        adapter_mod._context_manager = None
+        importlib.reload(adapter_mod)
+
+        assert adapter_mod.BACKEND_TYPE == "ollama"
+
+    def test_anthropic_from_env(self, monkeypatch, tmp_contexts_dir) -> None:
+        """BACKEND_TYPE=anthropic is read from environment."""
+        monkeypatch.setenv("BACKEND_TYPE", "anthropic")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setenv("GOVERNOR_CONTEXTS_DIR", str(tmp_contexts_dir))
+
+        import importlib
+        import gov_webui.adapter as adapter_mod
+        adapter_mod._bridge = None
+        adapter_mod._context_manager = None
+        importlib.reload(adapter_mod)
+
+        assert adapter_mod.BACKEND_TYPE == "anthropic"
+
+    def test_ollama_from_env(self, monkeypatch, tmp_contexts_dir) -> None:
+        """BACKEND_TYPE=ollama is read from environment."""
+        monkeypatch.setenv("BACKEND_TYPE", "ollama")
+        monkeypatch.setenv("GOVERNOR_CONTEXTS_DIR", str(tmp_contexts_dir))
+
+        import importlib
+        import gov_webui.adapter as adapter_mod
+        adapter_mod._bridge = None
+        adapter_mod._context_manager = None
+        importlib.reload(adapter_mod)
+
+        assert adapter_mod.BACKEND_TYPE == "ollama"
+
+
+# ============================================================================
+# TestStreamingResponse
+# ============================================================================
+
+
+class TestStreamingResponse:
+    """Tests for streaming chat responses."""
+
+    def test_streaming_request(self, client, monkeypatch) -> None:
+        """Streaming request returns SSE format."""
+        import gov_webui.adapter as adapter_mod
+
+        async def mock_stream(*args, **kwargs):
+            from governor.chat_bridge import ChatChunk
+            yield ChatChunk(content="Hello ")
+            yield ChatChunk(content="world", finish_reason="stop")
+
+        mock_bridge = AsyncMock()
+        mock_bridge.chat.return_value = mock_stream()
+        adapter_mod._bridge = mock_bridge
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": True,
+            },
+        )
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers.get("content-type", "")
+
+        # Parse SSE chunks
+        content = response.text
+        assert "data:" in content
+
+
+# ============================================================================
+# TestGovernorNow
+# ============================================================================
+
+
+class TestGovernorNow:
+    """Tests for GET /governor/now."""
+
+    def test_uninitialized_returns_ok(self, client) -> None:
+        """Uninitialized context returns ok status."""
+        response = client.get("/governor/now")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["sentence"].startswith("OK:")
+        assert data["last_event"] is None
+        assert data["suggested_action"] is None
+
+    def test_with_empty_context(self, client, tmp_contexts_dir) -> None:
+        """Empty initialized context returns ok."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/now")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["mode"] == "code"
+
+    def test_includes_context_id(self, client) -> None:
+        response = client.get("/governor/now")
+        data = response.json()
+        assert "context_id" in data
+
+    def test_includes_regime(self, client, tmp_contexts_dir) -> None:
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/now")
+        data = response.json()
+        # regime is present (may be None or a string depending on state)
+        assert "regime" in data
+
+    def test_response_shape(self, client) -> None:
+        """Response has all expected keys."""
+        response = client.get("/governor/now")
+        data = response.json()
+        expected_keys = {"context_id", "status", "sentence", "last_event", "suggested_action", "regime", "mode"}
+        assert expected_keys == set(data.keys())
+
+    def test_status_is_valid_pill(self, client) -> None:
+        response = client.get("/governor/now")
+        data = response.json()
+        assert data["status"] in ("ok", "needs_attention", "blocked")
+
+
+# ============================================================================
+# TestGovernorWhy
+# ============================================================================
+
+
+class TestGovernorWhy:
+    """Tests for GET /governor/why."""
+
+    def test_uninitialized_returns_empty(self, client) -> None:
+        response = client.get("/governor/why")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["feed"] == []
+        assert data["total"] == 0
+
+    def test_with_empty_context(self, client, tmp_contexts_dir) -> None:
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/why")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data["feed"], list)
+
+    def test_limit_parameter(self, client) -> None:
+        response = client.get("/governor/why?limit=5")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["feed"]) <= 5
+
+    def test_severity_parameter(self, client) -> None:
+        response = client.get("/governor/why?severity=error")
+        assert response.status_code == 200
+
+    def test_response_shape(self, client) -> None:
+        response = client.get("/governor/why")
+        data = response.json()
+        expected_keys = {"context_id", "feed", "total"}
+        assert expected_keys == set(data.keys())
+
+
+# ============================================================================
+# TestGovernorHistory
+# ============================================================================
+
+
+class TestGovernorHistory:
+    """Tests for GET /governor/history."""
+
+    def test_uninitialized_returns_empty(self, client) -> None:
+        response = client.get("/governor/history")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["days"] == []
+
+    def test_with_empty_context(self, client, tmp_contexts_dir) -> None:
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/history")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data["days"], list)
+
+    def test_days_parameter(self, client) -> None:
+        response = client.get("/governor/history?days=3")
+        assert response.status_code == 200
+
+    def test_response_shape(self, client) -> None:
+        response = client.get("/governor/history")
+        data = response.json()
+        expected_keys = {"context_id", "days"}
+        assert expected_keys == set(data.keys())
+
+
+# ============================================================================
+# TestGovernorDetail
+# ============================================================================
+
+
+class TestGovernorDetail:
+    """Tests for GET /governor/detail/{item_id}."""
+
+    def test_404_when_uninitialized(self, client) -> None:
+        response = client.get("/governor/detail/dec_test123")
+        assert response.status_code == 404
+
+    def test_404_unknown_id(self, client, tmp_contexts_dir) -> None:
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/detail/dec_nonexistent")
+        assert response.status_code == 404
+
+    def test_404_unknown_prefix(self, client, tmp_contexts_dir) -> None:
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/detail/xxx_unknown")
+        assert response.status_code == 404
+
+    def test_valid_prefixes_handled(self, client, tmp_contexts_dir) -> None:
+        """All valid prefixes (dec_, clm_, ev_, vio_) are handled without 500."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+
+        for prefix in ["dec_", "clm_", "ev_", "vio_"]:
+            response = client.get(f"/governor/detail/{prefix}nonexistent")
+            # Should be 404 (not found), not 500 (server error)
+            assert response.status_code == 404
+
+    def test_response_shape_on_404(self, client, tmp_contexts_dir) -> None:
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/detail/dec_missing")
+        assert response.status_code == 404
+        data = response.json()
+        assert "detail" in data
+
+
+# ============================================================================
+# TestGovernorStatusV2
+# ============================================================================
+
+
+class TestGovernorStatusV2:
+    """Tests for /governor/status with viewmodel integration."""
+
+    def test_uninitialized_no_viewmodel(self, client) -> None:
+        """Uninitialized context does not include viewmodel key."""
+        response = client.get("/governor/status")
+        data = response.json()
+        assert data["initialized"] is False
+        assert "viewmodel" not in data
+
+    def test_initialized_includes_viewmodel(self, client, tmp_contexts_dir) -> None:
+        """Initialized context includes viewmodel key."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/status")
+        data = response.json()
+        assert data["initialized"] is True
+        assert "viewmodel" in data
+        assert data["viewmodel"]["schema_version"] == "v2"
+
+    def test_backward_compat_fields(self, client, tmp_contexts_dir) -> None:
+        """Backward-compat fields still present alongside viewmodel."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/status")
+        data = response.json()
+        # Old fields still present
+        assert "context_id" in data
+        assert "initialized" in data
+        assert "mode" in data
+        assert "facts_count" in data
+        assert "decisions_count" in data
+        assert "metadata" in data
+        # New field present
+        assert "viewmodel" in data
+
+    def test_viewmodel_has_sections(self, client, tmp_contexts_dir) -> None:
+        """Viewmodel contains the 8 standard sections."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/status")
+        vm = response.json()["viewmodel"]
+        expected_sections = {"schema_version", "generated_at", "session", "regime",
+                             "decisions", "claims", "evidence", "violations",
+                             "execution", "stability"}
+        assert expected_sections == set(vm.keys())
+
+
+# ============================================================================
+# TestRootEndpointV2
+# ============================================================================
+
+
+class TestRootEndpointV2:
+    """Tests for new routes in api/info endpoint."""
+
+    def test_includes_new_endpoints(self, client) -> None:
+        response = client.get("/api/info")
+        data = response.json()
+        endpoints = data["endpoints"]
+        assert "governor_now" in endpoints
+        assert "governor_why" in endpoints
+        assert "governor_history" in endpoints
+        assert "governor_detail" in endpoints
+
+
+# ============================================================================
+# TestGovernorUI
+# ============================================================================
+
+
+class TestGovernorUI:
+    """Tests for GET /governor/ui."""
+
+    def test_ui_returns_html(self, client) -> None:
+        """GET /governor/ui returns 200 with HTML content type."""
+        response = client.get("/governor/ui")
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
+
+    def test_ui_contains_sections(self, client) -> None:
+        """HTML body contains the key UI elements."""
+        response = client.get("/governor/ui")
+        body = response.text
+        # Human-friendly UI has mode-specific panels and corrections log
+        assert "Governor" in body
+        assert "mode" in body.lower()
+        assert "Corrections" in body
+
+    def test_ui_in_api_info_endpoints(self, client) -> None:
+        """API info endpoint lists /governor/ui."""
+        response = client.get("/api/info")
+        data = response.json()
+        assert "governor_ui" in data["endpoints"]
+        assert data["endpoints"]["governor_ui"] == "/governor/ui"
+
+
+# ============================================================================
+# TestGovernorFooterIntegration
+# ============================================================================
+
+
+class TestGovernorFooterIntegration:
+    """End-to-end tests for governor footer in chat responses."""
+
+    def _setup_fiction_context(self, tmp_contexts_dir: Path) -> GovernorContextManager:
+        """Create a fiction context with a banned trope bible."""
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        ctx = cm.create("test-context", mode="fiction")
+        bible_dir = ctx.root / ".fiction-gov" / "bible"
+        bible_dir.mkdir(parents=True, exist_ok=True)
+        (bible_dir / "banned_tropes.json").write_text(json.dumps([
+            {"name": "chosen_one", "patterns": ["the chosen one"], "severity": "error", "reason": "cliche"},
+        ]))
+        return cm
+
+    def test_non_streaming_governor_ok_footer(self, client, tmp_contexts_dir) -> None:
+        """Non-streaming response includes [Governor] OK when clean."""
+        import gov_webui.adapter as adapter_mod
+        from governor.chat_bridge import ChatBridge, ChatResponse as BridgeCR
+
+        cm = self._setup_fiction_context(tmp_contexts_dir)
+
+        mock_backend = AsyncMock()
+        mock_backend.chat = AsyncMock(return_value=BridgeCR(
+            content="Alice walked peacefully.", model="test-model"
+        ))
+
+        bridge = ChatBridge(backend=mock_backend, context_manager=cm, show_ok_footer=True)
+        adapter_mod._bridge = bridge
+        adapter_mod._context_manager = cm
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Write a scene"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        assert "[Governor] OK" in content
+
+    def test_streaming_governor_footer_in_sse(self, client, tmp_contexts_dir) -> None:
+        """Streaming response includes governor feedback in SSE chunks."""
+        import gov_webui.adapter as adapter_mod
+        from governor.chat_bridge import ChatBridge, ChatChunk as BridgeChunk
+
+        cm = self._setup_fiction_context(tmp_contexts_dir)
+
+        async def mock_stream_fn(*args, **kwargs):
+            yield BridgeChunk(content="She was the chosen one.")
+            yield BridgeChunk(content="", finish_reason="stop")
+
+        mock_backend = AsyncMock()
+        mock_backend.stream = MagicMock(return_value=mock_stream_fn())
+
+        bridge = ChatBridge(backend=mock_backend, context_manager=cm, show_ok_footer=True)
+        adapter_mod._bridge = bridge
+        adapter_mod._context_manager = cm
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Write a scene"}],
+                "stream": True,
+            },
+        )
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers.get("content-type", "")
+
+        # Parse SSE data to find governor feedback
+        full_text = response.text
+        assert "[Governor]" in full_text
+
+
+# ============================================================================
+# TestSessionEndpoints
+# ============================================================================
+
+
+class TestSessionEndpoints:
+    """Tests for session CRUD endpoints."""
+
+    def test_list_sessions_empty(self, client, tmp_contexts_dir) -> None:
+        """GET /sessions/ returns empty list initially."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        response = client.get("/sessions/")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["sessions"] == []
+
+    def test_create_session(self, client, tmp_contexts_dir) -> None:
+        """POST /sessions/ creates a new session."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        response = client.post("/sessions/", json={"model": "test-model", "title": "My Chat"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["title"] == "My Chat"
+        assert data["model"] == "test-model"
+        assert "id" in data
+        assert data["message_count"] == 0
+
+    def test_get_session(self, client, tmp_contexts_dir) -> None:
+        """GET /sessions/{id} returns session with messages."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+        adapter_mod._session_store = store
+
+        # Create via API
+        create_resp = client.post("/sessions/", json={"title": "Test"})
+        session_id = create_resp.json()["id"]
+
+        response = client.get(f"/sessions/{session_id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == session_id
+        assert "messages" in data
+
+    def test_get_session_404(self, client, tmp_contexts_dir) -> None:
+        """GET /sessions/{id} returns 404 for missing session."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        response = client.get("/sessions/nonexistent")
+        assert response.status_code == 404
+
+    def test_delete_session(self, client, tmp_contexts_dir) -> None:
+        """DELETE /sessions/{id} removes session."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        create_resp = client.post("/sessions/", json={"title": "To Delete"})
+        session_id = create_resp.json()["id"]
+
+        response = client.delete(f"/sessions/{session_id}")
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+
+        # Confirm deletion
+        get_resp = client.get(f"/sessions/{session_id}")
+        assert get_resp.status_code == 404
+
+    def test_delete_session_404(self, client, tmp_contexts_dir) -> None:
+        """DELETE /sessions/{id} returns 404 for missing session."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        response = client.delete("/sessions/nonexistent")
+        assert response.status_code == 404
+
+    def test_update_title(self, client, tmp_contexts_dir) -> None:
+        """PATCH /sessions/{id} updates title."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        create_resp = client.post("/sessions/", json={"title": "Old"})
+        session_id = create_resp.json()["id"]
+
+        response = client.patch(f"/sessions/{session_id}", json={"title": "New Title"})
+        assert response.status_code == 200
+        assert response.json()["title"] == "New Title"
+
+    def test_append_message(self, client, tmp_contexts_dir) -> None:
+        """POST /sessions/{id}/messages appends a message."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        create_resp = client.post("/sessions/", json={"title": "Chat"})
+        session_id = create_resp.json()["id"]
+
+        response = client.post(f"/sessions/{session_id}/messages", json={
+            "role": "user", "content": "Hello world"
+        })
+        assert response.status_code == 200
+        msg_data = response.json()
+        assert msg_data["role"] == "user"
+        assert msg_data["content"] == "Hello world"
+
+        # Verify message was stored
+        get_resp = client.get(f"/sessions/{session_id}")
+        assert get_resp.json()["message_count"] == 1
+
+    def test_session_roundtrip(self, client, tmp_contexts_dir) -> None:
+        """Full roundtrip: create, add messages, retrieve."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        # Create
+        create_resp = client.post("/sessions/", json={"title": "Roundtrip", "model": "m1"})
+        session_id = create_resp.json()["id"]
+
+        # Add messages
+        client.post(f"/sessions/{session_id}/messages", json={
+            "role": "user", "content": "First"
+        })
+        client.post(f"/sessions/{session_id}/messages", json={
+            "role": "assistant", "content": "Response", "model": "m1"
+        })
+        client.post(f"/sessions/{session_id}/messages", json={
+            "role": "user", "content": "Second"
+        })
+
+        # Retrieve
+        get_resp = client.get(f"/sessions/{session_id}")
+        data = get_resp.json()
+        assert data["message_count"] == 3
+        assert data["messages"][0]["content"] == "First"
+        assert data["messages"][1]["content"] == "Response"
+        assert data["messages"][2]["content"] == "Second"
+
+    def test_api_info_includes_session_endpoints(self, client) -> None:
+        """GET /api/info includes session endpoints."""
+        response = client.get("/api/info")
+        data = response.json()
+        endpoints = data["endpoints"]
+        assert "sessions_list" in endpoints
+        assert "sessions_create" in endpoints
+        assert "sessions_get" in endpoints
+        assert "sessions_delete" in endpoints
+        assert "sessions_update" in endpoints
+        assert "sessions_append_message" in endpoints
+
+    def test_list_sessions_sorted_by_recent(self, client, tmp_contexts_dir) -> None:
+        """Sessions are listed most-recent first."""
+        import time
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        client.post("/sessions/", json={"title": "Older"})
+        time.sleep(0.01)
+        client.post("/sessions/", json={"title": "Newer"})
+
+        response = client.get("/sessions/")
+        sessions = response.json()["sessions"]
+        assert len(sessions) == 2
+        assert sessions[0]["title"] == "Newer"
+
+    def test_append_message_to_missing_session(self, client, tmp_contexts_dir) -> None:
+        """POST /sessions/{id}/messages returns 404 for missing session."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        response = client.post("/sessions/nonexistent/messages", json={
+            "role": "user", "content": "Hello"
+        })
+        assert response.status_code == 404
+
+    def test_update_title_missing_session(self, client, tmp_contexts_dir) -> None:
+        """PATCH /sessions/{id} returns 404 for missing session."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        response = client.patch("/sessions/nonexistent", json={"title": "X"})
+        assert response.status_code == 404
+
+    def test_create_session_default_title(self, client, tmp_contexts_dir) -> None:
+        """POST /sessions/ with no title gets default."""
+        import gov_webui.adapter as adapter_mod
+        from governor.session_store import SessionStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+        adapter_mod._session_store = SessionStore(tmp_contexts_dir / "test-context" / "sessions")
+
+        response = client.post("/sessions/", json={})
+        assert response.status_code == 200
+        assert response.json()["title"] == "New conversation"
+
+
+# ============================================================================
+# TestExportImport
+# ============================================================================
+
+
+class TestExportImport:
+    """Tests for governor export/import endpoints."""
+
+    def test_export_empty(self, client, tmp_contexts_dir) -> None:
+        """GET /governor/export returns empty state when nothing configured."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/governor/export")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["version"] == 1
+        assert data["anchors"] == []
+        assert "exported_at" in data
+
+    def test_export_with_anchors(self, client, tmp_contexts_dir) -> None:
+        """GET /governor/export includes all registered anchors."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        ctx = cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        # Add a character via the POST endpoint
+        client.post("/governor/fiction/characters", json={
+            "name": "Elena", "description": "Tall, green eyes", "voice": "Formal", "wont": "Show weakness"
+        })
+
+        response = client.get("/governor/export")
+        data = response.json()
+        assert len(data["anchors"]) >= 1
+        ids = [a["id"] for a in data["anchors"]]
+        assert "char-elena" in ids
+
+    def test_import_empty(self, client, tmp_contexts_dir) -> None:
+        """POST /governor/import with empty anchors imports nothing."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        response = client.post("/governor/import", json={"anchors": []})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["imported"] == 0
+
+    def test_import_anchors(self, client, tmp_contexts_dir) -> None:
+        """POST /governor/import creates anchors from exported data."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        payload = {
+            "anchors": [
+                {
+                    "id": "char-bob",
+                    "anchor_type": "canon",
+                    "description": "Appearance: Tall; Voice: Gruff",
+                    "severity": "reject",
+                },
+                {
+                    "id": "world-1",
+                    "anchor_type": "definition",
+                    "description": "Magic requires spoken words",
+                    "severity": "reject",
+                },
+            ]
+        }
+        response = client.post("/governor/import", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["imported"] == 2
+        assert data["skipped"] == 0
+
+        # Verify they show up in export
+        export = client.get("/governor/export").json()
+        ids = [a["id"] for a in export["anchors"]]
+        assert "char-bob" in ids
+        assert "world-1" in ids
+
+    def test_import_skips_duplicates(self, client, tmp_contexts_dir) -> None:
+        """POST /governor/import skips anchors that already exist."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        anchor = {
+            "id": "char-dup",
+            "anchor_type": "canon",
+            "description": "Test",
+            "severity": "reject",
+        }
+        # Import once
+        client.post("/governor/import", json={"anchors": [anchor]})
+        # Import again — should skip
+        response = client.post("/governor/import", json={"anchors": [anchor]})
+        data = response.json()
+        assert data["imported"] == 0
+        assert data["skipped"] == 1
+
+    def test_export_import_roundtrip(self, client, tmp_contexts_dir) -> None:
+        """Export then import into a fresh context produces the same anchors."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        # Add some state
+        client.post("/governor/fiction/characters", json={"name": "Alice", "description": "Brave"})
+        client.post("/governor/fiction/world-rules", json={"rule": "No flying"})
+        client.post("/governor/fiction/forbidden", json={"description": "Time travel"})
+
+        # Export
+        exported = client.get("/governor/export").json()
+        original_count = len(exported["anchors"])
+        assert original_count >= 3
+
+        # Create fresh context and import
+        cm2 = GovernorContextManager(base_dir=tmp_contexts_dir / "fresh")
+        cm2.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm2
+
+        response = client.post("/governor/import", json=exported)
+        data = response.json()
+        assert data["imported"] == original_count
+
+        # Verify export matches
+        re_exported = client.get("/governor/export").json()
+        assert len(re_exported["anchors"]) == original_count
+
+    def test_import_no_context(self, client, tmp_contexts_dir) -> None:
+        """POST /governor/import returns 400 when no context exists."""
+        import gov_webui.adapter as adapter_mod
+        adapter_mod._context_manager = GovernorContextManager(base_dir=tmp_contexts_dir)
+
+        response = client.post("/governor/import", json={"anchors": []})
+        assert response.status_code == 400
+
+    def test_api_info_includes_export_import(self, client, tmp_contexts_dir) -> None:
+        """GET /api/info includes export/import endpoint URLs."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="general")
+        adapter_mod._context_manager = cm
+
+        response = client.get("/api/info")
+        data = response.json()
+        assert "governor_export" in data["endpoints"]
+        assert "governor_import" in data["endpoints"]
+
+
+# ============================================================================
+# TestResearchEndpoints
+# ============================================================================
+
+
+class TestResearchEndpoints:
+    """Tests for /governor/research/ endpoints."""
+
+    @pytest.fixture(autouse=True)
+    def setup_research(self, client, tmp_contexts_dir) -> None:
+        """Create research mode context and reset research store."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="research")
+        adapter_mod._context_manager = cm
+        adapter_mod._research_store = None
+        adapter_mod.GOVERNOR_MODE = "research"
+
+    def test_state_empty(self, client) -> None:
+        """GET /governor/research/state returns empty state."""
+        response = client.get("/governor/research/state")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["claims"] == []
+        assert data["assumptions"] == []
+        assert data["ed"]["total"] == 0
+
+    def test_add_claim(self, client) -> None:
+        """POST /governor/research/claims creates a claim."""
+        response = client.post(
+            "/governor/research/claims",
+            json={"content": "Temperature affects rate"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"]
+        assert data["claim"]["content"] == "Temperature affects rate"
+        assert data["claim"]["status"] == "floating"
+
+    def test_add_claim_with_scope(self, client) -> None:
+        """POST /governor/research/claims with scope."""
+        response = client.post(
+            "/governor/research/claims",
+            json={"content": "Test claim", "scope": "Chapter 3"},
+        )
+        data = response.json()
+        assert data["claim"]["scope"] == "Chapter 3"
+
+    def test_delete_claim(self, client) -> None:
+        """DELETE /governor/research/claims/{id} removes claim."""
+        resp = client.post("/governor/research/claims", json={"content": "To delete"})
+        claim_id = resp.json()["claim"]["id"]
+
+        del_resp = client.delete(f"/governor/research/claims/{claim_id}")
+        assert del_resp.status_code == 200
+
+        state = client.get("/governor/research/state").json()
+        assert len(state["claims"]) == 0
+
+    def test_delete_claim_not_found(self, client) -> None:
+        response = client.delete("/governor/research/claims/C-NONEXISTENT")
+        assert response.status_code == 404
+
+    def test_change_claim_status(self, client) -> None:
+        """PATCH /governor/research/claims/{id}/status changes status."""
+        resp = client.post("/governor/research/claims", json={"content": "Test"})
+        claim_id = resp.json()["claim"]["id"]
+
+        patch_resp = client.patch(
+            f"/governor/research/claims/{claim_id}/status",
+            json={"status": "retracted"},
+        )
+        assert patch_resp.status_code == 200
+        assert patch_resp.json()["claim"]["status"] == "retracted"
+
+    def test_change_claim_status_invalid(self, client) -> None:
+        resp = client.post("/governor/research/claims", json={"content": "Test"})
+        claim_id = resp.json()["claim"]["id"]
+
+        patch_resp = client.patch(
+            f"/governor/research/claims/{claim_id}/status",
+            json={"status": "bogus"},
+        )
+        assert patch_resp.status_code == 400
+
+    def test_add_assumption(self, client) -> None:
+        """POST /governor/research/assumptions creates an assumption."""
+        response = client.post(
+            "/governor/research/assumptions",
+            json={"content": "Stable incentives"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["assumption"]["status"] == "proposed"
+
+    def test_delete_assumption(self, client) -> None:
+        resp = client.post("/governor/research/assumptions", json={"content": "Test"})
+        a_id = resp.json()["assumption"]["id"]
+        del_resp = client.delete(f"/governor/research/assumptions/{a_id}")
+        assert del_resp.status_code == 200
+
+    def test_change_assumption_status(self, client) -> None:
+        resp = client.post("/governor/research/assumptions", json={"content": "Test"})
+        a_id = resp.json()["assumption"]["id"]
+        patch_resp = client.patch(
+            f"/governor/research/assumptions/{a_id}/status",
+            json={"status": "accepted"},
+        )
+        assert patch_resp.status_code == 200
+        assert patch_resp.json()["assumption"]["status"] == "accepted"
+
+    def test_add_uncertainty(self, client) -> None:
+        """POST /governor/research/uncertainties creates an uncertainty."""
+        resp = client.post("/governor/research/claims", json={"content": "Claim"})
+        claim_id = resp.json()["claim"]["id"]
+
+        response = client.post(
+            "/governor/research/uncertainties",
+            json={"content": "Sample size", "attached_to": claim_id},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["uncertainty"]["attached_to"] == claim_id
+
+    def test_delete_uncertainty(self, client) -> None:
+        resp = client.post("/governor/research/uncertainties", json={"content": "Test"})
+        u_id = resp.json()["uncertainty"]["id"]
+        del_resp = client.delete(f"/governor/research/uncertainties/{u_id}")
+        assert del_resp.status_code == 200
+
+    def test_change_uncertainty_status(self, client) -> None:
+        resp = client.post("/governor/research/uncertainties", json={"content": "Test"})
+        u_id = resp.json()["uncertainty"]["id"]
+        patch_resp = client.patch(
+            f"/governor/research/uncertainties/{u_id}/status",
+            json={"status": "resolved"},
+        )
+        assert patch_resp.status_code == 200
+
+    def test_add_link(self, client) -> None:
+        """POST /governor/research/links creates a typed link."""
+        c1 = client.post("/governor/research/claims", json={"content": "Evidence"}).json()["claim"]
+        c2 = client.post("/governor/research/claims", json={"content": "Main"}).json()["claim"]
+
+        response = client.post(
+            "/governor/research/links",
+            json={"link_type": "supports", "from_id": c1["id"], "to_id": c2["id"]},
+        )
+        assert response.status_code == 200
+        assert response.json()["link"]["link_type"] == "supports"
+
+    def test_add_link_invalid_type(self, client) -> None:
+        response = client.post(
+            "/governor/research/links",
+            json={"link_type": "bogus", "from_id": "a", "to_id": "b"},
+        )
+        assert response.status_code == 400
+
+    def test_delete_link(self, client) -> None:
+        c1 = client.post("/governor/research/claims", json={"content": "A"}).json()["claim"]
+        c2 = client.post("/governor/research/claims", json={"content": "B"}).json()["claim"]
+        link = client.post(
+            "/governor/research/links",
+            json={"link_type": "supports", "from_id": c1["id"], "to_id": c2["id"]},
+        ).json()["link"]
+        del_resp = client.delete(f"/governor/research/links/{link['id']}")
+        assert del_resp.status_code == 200
+
+    def test_state_reflects_ed(self, client) -> None:
+        """State endpoint reflects ED computation."""
+        client.post("/governor/research/claims", json={"content": "Floating claim"})
+        state = client.get("/governor/research/state").json()
+        assert state["ed"]["floating"] == 1
+        assert state["ed"]["total"] > 0
+
+    def test_export_includes_research(self, client) -> None:
+        """Export includes research data in research mode."""
+        client.post("/governor/research/claims", json={"content": "Test claim"})
+        exported = client.get("/governor/export").json()
+        assert "research" in exported
+        assert len(exported["research"]["claims"]) == 1
+
+    def test_import_research_data(self, client) -> None:
+        """Import restores research data."""
+        client.post("/governor/research/claims", json={"content": "Original"})
+        exported = client.get("/governor/export").json()
+
+        # Add a new claim to the exported data
+        exported["research"]["claims"].append({
+            "id": "C-IMPORT1",
+            "content": "Imported",
+            "status": "floating",
+            "scope": "",
+            "created_at": "2024-01-01T00:00:00",
+        })
+
+        result = client.post("/governor/import", json=exported).json()
+        assert result["imported"] >= 1
+
+
+# ============================================================================
+# TestAuthMiddleware
+# ============================================================================
+
+
+class TestAuthMiddleware:
+    """Tests for bearer token auth on mutating endpoints."""
+
+    @pytest.fixture
+    def auth_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Set up environment with auth token."""
+        contexts_dir = tmp_path / "contexts"
+        monkeypatch.setenv("BACKEND_TYPE", "ollama")
+        monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
+        monkeypatch.setenv("GOVERNOR_CONTEXT_ID", "auth-test")
+        monkeypatch.setenv("GOVERNOR_MODE", "general")
+        monkeypatch.setenv("GOVERNOR_CONTEXTS_DIR", str(contexts_dir))
+        monkeypatch.setenv("GOVERNOR_AUTH_TOKEN", "test-secret-token")
+
+    @pytest.fixture
+    def auth_app(self, auth_env):
+        import importlib
+        import gov_webui.adapter as adapter_mod
+        adapter_mod._bridge = None
+        adapter_mod._context_manager = None
+        adapter_mod._session_store = None
+        importlib.reload(adapter_mod)
+        yield adapter_mod.app
+        adapter_mod._bridge = None
+        adapter_mod._context_manager = None
+        adapter_mod._session_store = None
+
+    @pytest.fixture
+    def auth_client(self, auth_app):
+        from fastapi.testclient import TestClient
+        return TestClient(auth_app)
+
+    def test_get_endpoints_open(self, auth_client) -> None:
+        """GET requests don't require auth even with token configured."""
+        resp = auth_client.get("/health")
+        assert resp.status_code == 200
+
+    def test_post_without_token_rejected(self, auth_client) -> None:
+        """POST without Authorization header returns 401."""
+        resp = auth_client.post("/sessions/", json={"title": "test"})
+        assert resp.status_code == 401
+        assert "Authorization" in resp.json()["detail"]
+
+    def test_post_with_wrong_token_rejected(self, auth_client) -> None:
+        """POST with wrong token returns 403."""
+        resp = auth_client.post(
+            "/sessions/",
+            json={"title": "test"},
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+        assert resp.status_code == 403
+
+    def test_post_with_correct_token_allowed(self, auth_client) -> None:
+        """POST with correct token succeeds."""
+        resp = auth_client.post(
+            "/sessions/",
+            json={"title": "test"},
+            headers={"Authorization": "Bearer test-secret-token"},
+        )
+        assert resp.status_code == 200
+
+    def test_delete_requires_token(self, auth_client) -> None:
+        """DELETE requests also require auth."""
+        resp = auth_client.delete("/sessions/nonexistent")
+        assert resp.status_code == 401
+
+    def test_get_governor_now_open(self, auth_client) -> None:
+        """GET /governor/now doesn't require auth."""
+        resp = auth_client.get("/governor/now")
+        assert resp.status_code == 200

@@ -1,0 +1,41 @@
+# Agent Governor WebUI — Claude Code Backend Override
+#
+# Recommended: ./start.sh (auto-detects everything)
+#
+# Manual: docker-compose -f docker-compose.yml -f docker-compose.claude-code.yml up --build -d
+#
+# Routes chat through the `claude` CLI to use your Claude Max subscription
+# instead of paying API credits. Requires Claude Code CLI installed and
+# authenticated on the host.
+#
+# REAL_HOME and CLAUDE_VERSION are auto-detected by start.sh and written to .env.
+# If running manually, set them or create .env:
+#   REAL_HOME=/home/youruser
+#   CLAUDE_VERSION=2.1.31
+
+services:
+  fiction-adapter:
+    environment:
+      - BACKEND_TYPE=claude-code
+      - CLAUDE_PATH=/opt/claude/claude
+    volumes:
+      # Mount claude binary (resolve REAL_HOME for snap Docker compatibility)
+      - ${REAL_HOME:-${HOME}}/.local/share/claude/versions/${CLAUDE_VERSION:-2.1.31}:/opt/claude/claude:ro
+      # Mount credentials file (read-only) for authentication
+      - ${REAL_HOME:-${HOME}}/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+
+  code-adapter:
+    environment:
+      - BACKEND_TYPE=claude-code
+      - CLAUDE_PATH=/opt/claude/claude
+    volumes:
+      - ${REAL_HOME:-${HOME}}/.local/share/claude/versions/${CLAUDE_VERSION:-2.1.31}:/opt/claude/claude:ro
+      - ${REAL_HOME:-${HOME}}/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+
+  research-adapter:
+    environment:
+      - BACKEND_TYPE=claude-code
+      - CLAUDE_PATH=/opt/claude/claude
+    volumes:
+      - ${REAL_HOME:-${HOME}}/.local/share/claude/versions/${CLAUDE_VERSION:-2.1.31}:/opt/claude/claude:ro
+      - ${REAL_HOME:-${HOME}}/.claude/.credentials.json:/root/.claude/.credentials.json:ro

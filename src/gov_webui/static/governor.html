@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Governor</title>
+<style>
+  :root {
+    --bg: #fff; --fg: #111; --muted: #666; --border: #ddd;
+    --card-bg: #fafafa; --badge-ok: #22c55e; --badge-warn: #eab308; --badge-block: #ef4444;
+    --accent: #3b82f6; --accent-light: #eff6ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111; --fg: #eee; --muted: #999; --border: #333;
+      --card-bg: #1a1a1a; --accent-light: #1e3a5f;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.5; }
+  .container { max-width: 360px; margin: 0 auto; padding: 1rem; }
+
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  header h1 { font-size: 1rem; font-weight: 600; }
+  .mode-badge { font-size: 0.75rem; background: var(--accent-light); color: var(--accent); padding: 0.2rem 0.5rem; border-radius: 4px; }
+
+  button { background: var(--card-bg); border: 1px solid var(--border); color: var(--fg); padding: 0.4rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { opacity: 0.9; }
+
+  .card { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 1rem; background: var(--card-bg); }
+  .card-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-bottom: 1px solid var(--border); }
+  .card-header h2 { font-size: 0.85rem; font-weight: 500; }
+  .card-header .count { font-size: 0.75rem; color: var(--muted); }
+  .card-body { padding: 0.75rem; }
+  .card-body.empty { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 1.5rem 0.75rem; }
+
+  .item { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+  .item:last-child { border-bottom: none; }
+  .item-title { font-size: 0.9rem; font-weight: 500; }
+  .item-detail { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+
+  .status-banner { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem; }
+  .status-banner.ok { background: #dcfce7; color: #166534; }
+  .status-banner.warn { background: #fef3c7; color: #92400e; }
+  .status-banner.block { background: #fee2e2; color: #991b1b; }
+  .status-banner .icon { font-size: 1.2rem; }
+  .status-banner .text { font-size: 0.9rem; flex: 1; }
+
+  /* Corrections Log */
+  .correction { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+  .correction:last-child { border-bottom: none; }
+  .correction-icon { display: inline-block; width: 1.2rem; margin-right: 0.25rem; }
+  .correction-text { font-size: 0.85rem; }
+  .correction-meta { font-size: 0.75rem; color: var(--muted); }
+
+  /* Modal */
+  .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--bg); border-radius: 12px; max-width: 340px; width: 90%; padding: 1.25rem; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+  .modal h3 { font-size: 1rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+  .modal .quoted { background: var(--card-bg); padding: 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 0.75rem; border-left: 3px solid var(--badge-warn); }
+  .modal .label { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.25rem; }
+  .modal .buttons { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+  .modal .buttons button { flex: 1; min-width: 80px; }
+  .modal .button-hint { font-size: 0.7rem; color: var(--muted); text-align: center; margin-top: 0.25rem; }
+
+  /* Input */
+  input, textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; background: var(--bg); color: var(--fg); }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  textarea { min-height: 80px; resize: vertical; }
+  .form-group { margin-bottom: 0.75rem; }
+  .form-group label { display: block; font-size: 0.8rem; margin-bottom: 0.25rem; }
+
+  .hidden { display: none !important; }
+
+  @media (prefers-color-scheme: dark) {
+    .status-banner.ok { background: #14532d; color: #86efac; }
+    .status-banner.warn { background: #78350f; color: #fcd34d; }
+    .status-banner.block { background: #7f1d1d; color: #fca5a5; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Governor</h1>
+    <span class="mode-badge" id="mode-badge">Loading...</span>
+  </header>
+
+  <!-- Status Banner -->
+  <div class="status-banner ok" id="status-banner">
+    <span class="icon">✓</span>
+    <span class="text" id="status-text">Everything looks good.</span>
+  </div>
+
+  <!-- Fiction Mode Panel -->
+  <div id="fiction-panel" class="hidden">
+    <!-- Characters -->
+    <div class="card">
+      <div class="card-header">
+        <h2>Characters</h2>
+        <span class="count" id="char-count">0</span>
+      </div>
+      <div class="card-body" id="characters-list">
+        <div class="empty">
+          No characters yet.<br>
+          Add one and I'll remember what's true about them.
+        </div>
+      </div>
+      <div style="padding: 0 0.75rem 0.75rem;">
+        <button onclick="openAddCharacter()" style="width: 100%;">+ Add Character</button>
+      </div>
+    </div>
+
+    <!-- World Rules -->
+    <div class="card">
+      <div class="card-header">
+        <h2>World Rules</h2>
+        <span class="count" id="rule-count">0</span>
+      </div>
+      <div class="card-body" id="rules-list">
+        <div class="empty">
+          No rules yet.<br>
+          Tell me how your world works and I'll keep it consistent.
+        </div>
+      </div>
+      <div style="padding: 0 0.75rem 0.75rem;">
+        <button onclick="openAddRule()" style="width: 100%;">+ Add Rule</button>
+      </div>
+    </div>
+
+    <!-- Things That Shouldn't Happen -->
+    <div class="card">
+      <div class="card-header">
+        <h2>Things That Shouldn't Happen</h2>
+        <span class="count" id="forbid-count">0</span>
+      </div>
+      <div class="card-body" id="forbidden-list">
+        <div class="empty">Nothing forbidden yet.</div>
+      </div>
+      <div style="padding: 0 0.75rem 0.75rem;">
+        <button onclick="openAddForbidden()" style="width: 100%;">+ Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Code Mode Panel -->
+  <div id="code-panel" class="hidden">
+    <!-- Decisions -->
+    <div class="card">
+      <div class="card-header">
+        <h2>Decisions</h2>
+        <span class="count" id="decision-count">0</span>
+      </div>
+      <div class="card-body" id="decisions-list">
+        <div class="empty">
+          No decisions recorded yet.<br>
+          Add architectural decisions and I'll catch when something contradicts them.
+        </div>
+      </div>
+      <div style="padding: 0 0.75rem 0.75rem;">
+        <button onclick="openAddDecision()" style="width: 100%;">+ Add Decision</button>
+      </div>
+    </div>
+
+    <!-- Constraints -->
+    <div class="card">
+      <div class="card-header">
+        <h2>Constraints</h2>
+        <span class="count" id="constraint-count">0</span>
+      </div>
+      <div class="card-body" id="constraints-list">
+        <div class="empty">No constraints yet.</div>
+      </div>
+      <div style="padding: 0 0.75rem 0.75rem;">
+        <button onclick="openAddConstraint()" style="width: 100%;">+ Add Constraint</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Corrections Log (Both Modes) -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Corrections</h2>
+    </div>
+    <div class="card-body" id="corrections-list">
+      <div class="empty">
+        Nothing yet.<br>
+        When I catch something that contradicts your rules, it'll show up here.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Character Modal -->
+<div class="modal-overlay" id="add-char-modal">
+  <div class="modal">
+    <h3>Add Character</h3>
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="char-name" placeholder="Elena">
+    </div>
+    <div class="form-group">
+      <label>What's true about them (appearance, background, etc.)</label>
+      <textarea id="char-desc" placeholder="Tall, green eyes, grew up in Valencia..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>How they talk and act</label>
+      <input type="text" id="char-voice" placeholder="Formal speech, never uses contractions...">
+    </div>
+    <div class="form-group">
+      <label>Things they wouldn't do</label>
+      <input type="text" id="char-wont" placeholder="Smile warmly, show vulnerability...">
+    </div>
+    <div class="buttons">
+      <button onclick="closeModal('add-char-modal')">Cancel</button>
+      <button class="primary" onclick="submitCharacter()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Rule Modal -->
+<div class="modal-overlay" id="add-rule-modal">
+  <div class="modal">
+    <h3>Add World Rule</h3>
+    <div class="form-group">
+      <label>What's true about your world?</label>
+      <textarea id="rule-text" placeholder="Magic requires spoken words. Technology is 1920s level..."></textarea>
+    </div>
+    <div class="buttons">
+      <button onclick="closeModal('add-rule-modal')">Cancel</button>
+      <button class="primary" onclick="submitRule()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Forbidden Modal -->
+<div class="modal-overlay" id="add-forbid-modal">
+  <div class="modal">
+    <h3>What shouldn't happen?</h3>
+    <div class="form-group">
+      <label>Describe what you want to avoid</label>
+      <textarea id="forbid-text" placeholder="Graphic violence, modern slang..."></textarea>
+    </div>
+    <div class="buttons">
+      <button onclick="closeModal('add-forbid-modal')">Cancel</button>
+      <button class="primary" onclick="submitForbidden()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Decision Modal -->
+<div class="modal-overlay" id="add-decision-modal">
+  <div class="modal">
+    <h3>Record a Decision</h3>
+    <div class="form-group">
+      <label>What did you decide?</label>
+      <input type="text" id="decision-text" placeholder="REST API, not GraphQL">
+    </div>
+    <div class="form-group">
+      <label>Why? (helps future-you remember)</label>
+      <input type="text" id="decision-rationale" placeholder="Simpler, team knows it...">
+    </div>
+    <div class="buttons">
+      <button onclick="closeModal('add-decision-modal')">Cancel</button>
+      <button class="primary" onclick="submitDecision()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Constraint Modal -->
+<div class="modal-overlay" id="add-constraint-modal">
+  <div class="modal">
+    <h3>Add Constraint</h3>
+    <div class="form-group">
+      <label>What shouldn't happen in the code?</label>
+      <input type="text" id="constraint-text" placeholder="No raw SQL, No Redux...">
+    </div>
+    <div class="buttons">
+      <button onclick="closeModal('add-constraint-modal')">Cancel</button>
+      <button class="primary" onclick="submitConstraint()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Violation Resolution Modal -->
+<div class="modal-overlay" id="violation-modal">
+  <div class="modal">
+    <h3 id="violation-title">This contradicts your rules</h3>
+    <div class="label">What was written:</div>
+    <div class="quoted" id="violation-written"></div>
+    <div class="label">What you established:</div>
+    <div class="quoted" id="violation-rule"></div>
+    <div class="buttons">
+      <button onclick="resolveViolation('fix')">
+        <div>Rewrite</div>
+        <div class="button-hint">Fix to match</div>
+      </button>
+      <button onclick="resolveViolation('revise')">
+        <div>Change Rule</div>
+        <div class="button-hint">Update the rule</div>
+      </button>
+      <button onclick="resolveViolation('proceed')">
+        <div>Allow Once</div>
+        <div class="button-hint">Let it go</div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var mode = 'general';
+  var REFRESH_INTERVAL = 3000;
+
+  function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function setMode(m) {
+    mode = m;
+    document.getElementById('mode-badge').textContent = m.charAt(0).toUpperCase() + m.slice(1);
+    document.getElementById('fiction-panel').classList.toggle('hidden', m !== 'fiction');
+    document.getElementById('code-panel').classList.toggle('hidden', m !== 'code');
+  }
+
+  function setStatus(status, text) {
+    var banner = document.getElementById('status-banner');
+    banner.className = 'status-banner ' + (status === 'ok' ? 'ok' : status === 'needs_attention' ? 'warn' : 'block');
+    banner.querySelector('.icon').textContent = status === 'ok' ? '✓' : status === 'blocked' ? '⚠' : '!';
+    document.getElementById('status-text').textContent = text || (status === 'ok' ? 'Everything looks good.' : 'Needs attention.');
+  }
+
+  function renderCharacters(chars) {
+    var el = document.getElementById('characters-list');
+    document.getElementById('char-count').textContent = chars.length;
+    if (chars.length === 0) {
+      el.innerHTML = '<div class="empty">No characters yet.<br>Add one and I\'ll remember what\'s true about them.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < chars.length; i++) {
+      var c = chars[i];
+      html += '<div class="item"><div class="item-title">' + esc(c.name) + '</div>';
+      if (c.description) html += '<div class="item-detail">' + esc(c.description) + '</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderRules(rules) {
+    var el = document.getElementById('rules-list');
+    document.getElementById('rule-count').textContent = rules.length;
+    if (rules.length === 0) {
+      el.innerHTML = '<div class="empty">No rules yet.<br>Tell me how your world works.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < rules.length; i++) {
+      html += '<div class="item"><div class="item-detail">' + esc(rules[i].rule) + '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderForbidden(list) {
+    var el = document.getElementById('forbidden-list');
+    document.getElementById('forbid-count').textContent = list.length;
+    if (list.length === 0) {
+      el.innerHTML = '<div class="empty">Nothing forbidden yet.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      html += '<div class="item"><div class="item-detail">' + esc(list[i].description) + '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderDecisions(list) {
+    var el = document.getElementById('decisions-list');
+    document.getElementById('decision-count').textContent = list.length;
+    if (list.length === 0) {
+      el.innerHTML = '<div class="empty">No decisions recorded yet.<br>Add one and I\'ll catch contradictions.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      var d = list[i];
+      html += '<div class="item"><div class="item-title">' + esc(d.topic) + ': ' + esc(d.choice) + '</div>';
+      if (d.rationale) html += '<div class="item-detail">"' + esc(d.rationale) + '"</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderConstraints(list) {
+    var el = document.getElementById('constraints-list');
+    document.getElementById('constraint-count').textContent = list.length;
+    if (list.length === 0) {
+      el.innerHTML = '<div class="empty">No constraints yet.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      html += '<div class="item"><div class="item-detail">' + esc(list[i].description) + '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderCorrections(list) {
+    var el = document.getElementById('corrections-list');
+    if (list.length === 0) {
+      el.innerHTML = '<div class="empty">Nothing yet.<br>When I catch something, it\'ll show up here.</div>';
+      return;
+    }
+    var icons = { fix: '🔄', revise: '✎', proceed: '✓' };
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      var icon = icons[c.action] || '•';
+      html += '<div class="correction"><span class="correction-icon">' + icon + '</span>';
+      html += '<span class="correction-text">' + esc(c.summary || c.anchor_id) + '</span></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function fetchStatus() {
+    fetch('status').then(function(r) { return r.json(); }).then(function(data) {
+      setMode(data.mode || 'general');
+    }).catch(function() {});
+  }
+
+  function fetchNow() {
+    fetch('now').then(function(r) { return r.json(); }).then(function(data) {
+      setStatus(data.status, data.sentence);
+    }).catch(function() {});
+  }
+
+  function fetchFictionData() {
+    Promise.all([
+      fetch('fiction/characters').then(function(r) { return r.json(); }),
+      fetch('fiction/world-rules').then(function(r) { return r.json(); }),
+      fetch('fiction/forbidden').then(function(r) { return r.json(); })
+    ]).then(function(results) {
+      renderCharacters(results[0].characters || []);
+      renderRules(results[1].rules || []);
+      renderForbidden(results[2].forbidden || []);
+    }).catch(function() {});
+  }
+
+  function fetchCodeData() {
+    Promise.all([
+      fetch('code/decisions').then(function(r) { return r.json(); }),
+      fetch('code/constraints').then(function(r) { return r.json(); })
+    ]).then(function(results) {
+      renderDecisions(results[0].decisions || []);
+      renderConstraints(results[1].constraints || []);
+    }).catch(function() {});
+  }
+
+  function fetchCorrections() {
+    fetch('corrections').then(function(r) { return r.json(); }).then(function(data) {
+      renderCorrections(data.corrections || []);
+    }).catch(function() {});
+  }
+
+  function refresh() {
+    fetchStatus();
+    fetchNow();
+    if (mode === 'fiction') fetchFictionData();
+    if (mode === 'code') fetchCodeData();
+    fetchCorrections();
+  }
+
+  // Modal helpers
+  window.openModal = function(id) {
+    document.getElementById(id).classList.add('open');
+  };
+  window.closeModal = function(id) {
+    document.getElementById(id).classList.remove('open');
+  };
+
+  window.openAddCharacter = function() { openModal('add-char-modal'); };
+  window.openAddRule = function() { openModal('add-rule-modal'); };
+  window.openAddForbidden = function() { openModal('add-forbid-modal'); };
+  window.openAddDecision = function() { openModal('add-decision-modal'); };
+  window.openAddConstraint = function() { openModal('add-constraint-modal'); };
+
+  window.submitCharacter = function() {
+    var data = {
+      name: document.getElementById('char-name').value,
+      description: document.getElementById('char-desc').value,
+      voice: document.getElementById('char-voice').value,
+      wont: document.getElementById('char-wont').value
+    };
+    fetch('fiction/characters', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(function() {
+      closeModal('add-char-modal');
+      document.getElementById('char-name').value = '';
+      document.getElementById('char-desc').value = '';
+      document.getElementById('char-voice').value = '';
+      document.getElementById('char-wont').value = '';
+      fetchFictionData();
+    });
+  };
+
+  window.submitRule = function() {
+    fetch('fiction/world-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rule: document.getElementById('rule-text').value })
+    }).then(function() {
+      closeModal('add-rule-modal');
+      document.getElementById('rule-text').value = '';
+      fetchFictionData();
+    });
+  };
+
+  window.submitForbidden = function() {
+    fetch('fiction/forbidden', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: document.getElementById('forbid-text').value })
+    }).then(function() {
+      closeModal('add-forbid-modal');
+      document.getElementById('forbid-text').value = '';
+      fetchFictionData();
+    });
+  };
+
+  window.submitDecision = function() {
+    fetch('code/decisions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        decision: document.getElementById('decision-text').value,
+        rationale: document.getElementById('decision-rationale').value
+      })
+    }).then(function() {
+      closeModal('add-decision-modal');
+      document.getElementById('decision-text').value = '';
+      document.getElementById('decision-rationale').value = '';
+      fetchCodeData();
+    });
+  };
+
+  window.submitConstraint = function() {
+    fetch('code/constraints', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ constraint: document.getElementById('constraint-text').value })
+    }).then(function() {
+      closeModal('add-constraint-modal');
+      document.getElementById('constraint-text').value = '';
+      fetchCodeData();
+    });
+  };
+
+  window.resolveViolation = function(action) {
+    // Send resolution to chat endpoint (1, 2, or 3)
+    var num = action === 'fix' ? '1' : action === 'revise' ? '2' : '3';
+    // This would integrate with the chat - for now just close
+    closeModal('violation-modal');
+    refresh();
+  };
+
+  // Initial load
+  refresh();
+  setInterval(refresh, REFRESH_INTERVAL);
+})();
+</script>
+</body>
+</html>

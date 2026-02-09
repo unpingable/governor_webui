@@ -1,0 +1,40 @@
+# Agent Governor WebUI — Codex Backend Override
+#
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.codex.yml up --build -d
+#
+# Routes chat through the `codex` CLI to use your ChatGPT subscription
+# instead of paying API credits. Requires Codex CLI installed and
+# authenticated on the host.
+#
+# Codex stores config at ~/.codex/ (config.toml, auth).
+# NODE_VERSION should match your nvm active version (e.g. v24.13.0).
+#
+# Set NODE_VERSION in .env or environment:
+#   NODE_VERSION=v24.13.0
+
+services:
+  fiction-adapter:
+    environment:
+      - BACKEND_TYPE=codex
+      - CODEX_PATH=/opt/codex/codex
+    volumes:
+      # Mount codex binary from nvm global install
+      - ${REAL_HOME:-${HOME}}/.nvm/versions/node/${NODE_VERSION:-v24.13.0}/lib/node_modules/@openai/codex/vendor/${ARCH:-x86_64-unknown-linux-musl}/codex/codex:/opt/codex/codex:ro
+      # Mount codex config and auth (read-only)
+      - ${REAL_HOME:-${HOME}}/.codex:/root/.codex:ro
+
+  code-adapter:
+    environment:
+      - BACKEND_TYPE=codex
+      - CODEX_PATH=/opt/codex/codex
+    volumes:
+      - ${REAL_HOME:-${HOME}}/.nvm/versions/node/${NODE_VERSION:-v24.13.0}/lib/node_modules/@openai/codex/vendor/${ARCH:-x86_64-unknown-linux-musl}/codex/codex:/opt/codex/codex:ro
+      - ${REAL_HOME:-${HOME}}/.codex:/root/.codex:ro
+
+  research-adapter:
+    environment:
+      - BACKEND_TYPE=codex
+      - CODEX_PATH=/opt/codex/codex
+    volumes:
+      - ${REAL_HOME:-${HOME}}/.nvm/versions/node/${NODE_VERSION:-v24.13.0}/lib/node_modules/@openai/codex/vendor/${ARCH:-x86_64-unknown-linux-musl}/codex/codex:/opt/codex/codex:ro
+      - ${REAL_HOME:-${HOME}}/.codex:/root/.codex:ro

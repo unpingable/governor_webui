@@ -1,0 +1,79 @@
+# Governor WebUI — Multi-User Stack
+#
+# Run: docker-compose up -d
+#
+# Self-contained chat + governor panel:
+#   - Fiction:  http://localhost:8001
+#   - Code:     http://localhost:8002
+#   - Research: http://localhost:8003
+#
+# Requires: ANTHROPIC_API_KEY in .env or environment
+#
+# For local Ollama usage instead, see docker-compose.ollama.yml
+
+services:
+  # ============================================================
+  # Fiction writing stack
+  # ============================================================
+
+  fiction-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: governor-fiction-adapter
+    ports:
+      - "8001:8000"
+    environment:
+      - BACKEND_TYPE=anthropic
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOVERNOR_CONTEXT_ID=fiction-current-novel
+      - GOVERNOR_MODE=fiction
+      - GOVERNOR_CONTEXTS_DIR=/contexts
+    volumes:
+      - contexts_data:/contexts
+    restart: unless-stopped
+
+  # ============================================================
+  # Code development stack
+  # ============================================================
+
+  code-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: governor-code-adapter
+    ports:
+      - "8002:8000"
+    environment:
+      - BACKEND_TYPE=anthropic
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOVERNOR_CONTEXT_ID=code-current-project
+      - GOVERNOR_MODE=code
+      - GOVERNOR_CONTEXTS_DIR=/contexts
+    volumes:
+      - contexts_data:/contexts
+    restart: unless-stopped
+
+  # ============================================================
+  # Research writing stack
+  # ============================================================
+
+  research-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: governor-research-adapter
+    ports:
+      - "8003:8000"
+    environment:
+      - BACKEND_TYPE=anthropic
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOVERNOR_CONTEXT_ID=research-current
+      - GOVERNOR_MODE=research
+      - GOVERNOR_CONTEXTS_DIR=/contexts
+    volumes:
+      - contexts_data:/contexts
+    restart: unless-stopped
+
+volumes:
+  contexts_data:

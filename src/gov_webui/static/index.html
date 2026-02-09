@@ -1,0 +1,1973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Governor Chat</title>
+<style>
+  :root {
+    --bg: #fff; --fg: #111; --muted: #666; --border: #ddd;
+    --card-bg: #fafafa; --badge-ok: #22c55e; --badge-warn: #eab308; --badge-block: #ef4444;
+    --accent: #3b82f6; --accent-light: #eff6ff;
+    --msg-user: #eff6ff; --msg-asst: #f9fafb;
+    --code-bg: #f3f4f6; --code-border: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111; --fg: #eee; --muted: #999; --border: #333;
+      --card-bg: #1a1a1a; --accent-light: #1e3a5f;
+      --msg-user: #1e3a5f; --msg-asst: #1a1a1a;
+      --code-bg: #1e1e1e; --code-border: #333;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.5; height: 100vh; overflow: hidden; min-height: 400px; }
+
+  /* Layout */
+  .app { display: grid; grid-template-columns: 1fr 340px; height: 100vh; min-height: 0; }
+
+  /* Chat Panel */
+  .chat-panel { display: flex; flex-direction: column; border-right: 1px solid var(--border); min-height: 0; }
+  .chat-header { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .chat-header h1 { font-size: 1rem; font-weight: 600; }
+  .model-select { padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 0.8rem; }
+  .backend-badge { font-size: 0.7rem; color: var(--muted); margin-left: auto; }
+
+  .messages { flex: 1; overflow-y: auto; padding: 1rem; min-height: 0; }
+  .message { margin-bottom: 1rem; display: flex; gap: 0.75rem; }
+  .message.user { justify-content: flex-end; }
+  .message.user .bubble { background: var(--msg-user); border-radius: 12px 12px 2px 12px; max-width: 80%; }
+  .message.assistant .bubble { background: var(--msg-asst); border: 1px solid var(--border); border-radius: 12px 12px 12px 2px; max-width: 85%; }
+  .bubble { padding: 0.75rem 1rem; font-size: 0.9rem; word-wrap: break-word; overflow-wrap: break-word; }
+  .bubble p { margin-bottom: 0.5rem; }
+  .bubble p:last-child { margin-bottom: 0; }
+  .bubble strong { font-weight: 600; }
+  .bubble em { font-style: italic; }
+  .bubble code { background: var(--code-bg); padding: 0.15rem 0.35rem; border-radius: 3px; font-size: 0.85em; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+  .bubble pre { background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 6px; padding: 0.75rem; overflow-x: auto; margin: 0.5rem 0; }
+  .bubble pre code { background: none; padding: 0; font-size: 0.85em; }
+  .bubble ul, .bubble ol { margin: 0.5rem 0 0.5rem 1.5rem; }
+
+  .typing-indicator { color: var(--muted); font-size: 0.85rem; padding: 0.5rem 0; display: none; }
+  .typing-indicator.active { display: block; }
+
+  .chat-input { display: flex; gap: 0.5rem; padding: 0.75rem 1rem; border-top: 1px solid var(--border); flex-shrink: 0; }
+  .chat-input textarea { flex: 1; padding: 0.6rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; background: var(--bg); color: var(--fg); resize: none; min-height: 42px; max-height: 120px; font-family: inherit; }
+  .chat-input textarea:focus { outline: none; border-color: var(--accent); }
+  .chat-input button { padding: 0.5rem 1rem; background: var(--accent); color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; flex-shrink: 0; }
+  .chat-input button:hover { opacity: 0.9; }
+  .chat-input button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Governor Sidebar */
+  .governor-panel { display: flex; flex-direction: column; overflow-y: auto; padding: 1rem; min-height: 0; }
+
+  /* Reuse governor.html styles */
+  .gov-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  .gov-header h2 { font-size: 1rem; font-weight: 600; }
+  .mode-badge { font-size: 0.75rem; background: var(--accent-light); color: var(--accent); padding: 0.2rem 0.5rem; border-radius: 4px; }
+
+  button.gov-btn { background: var(--card-bg); border: 1px solid var(--border); color: var(--fg); padding: 0.4rem 0.75rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+  button.gov-btn:hover { border-color: var(--muted); }
+  button.gov-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.gov-btn.primary:hover { opacity: 0.9; }
+
+  .card { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 1rem; background: var(--card-bg); }
+  .card-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-bottom: 1px solid var(--border); }
+  .card-header h3 { font-size: 0.85rem; font-weight: 500; }
+  .card-header .count { font-size: 0.75rem; color: var(--muted); }
+  .card-body { padding: 0.75rem; }
+  .card-body.empty { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 1.5rem 0.75rem; }
+
+  .item { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+  .item:last-child { border-bottom: none; }
+  .item-title { font-size: 0.9rem; font-weight: 500; }
+  .item-detail { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+
+  .status-banner { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem; }
+  .status-banner.ok { background: #dcfce7; color: #166534; }
+  .status-banner.warn { background: #fef3c7; color: #92400e; }
+  .status-banner.block { background: #fee2e2; color: #991b1b; }
+  .status-banner .icon { font-size: 1.2rem; }
+  .status-banner .text { font-size: 0.9rem; flex: 1; }
+
+  .correction { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+  .correction:last-child { border-bottom: none; }
+  .correction-icon { display: inline-block; width: 1.2rem; margin-right: 0.25rem; }
+  .correction-text { font-size: 0.85rem; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--bg); border-radius: 12px; max-width: 400px; width: 90%; padding: 1.25rem; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+  .modal h3 { font-size: 1rem; margin-bottom: 0.75rem; }
+  .modal .form-group { margin-bottom: 0.75rem; }
+  .modal .form-group label { display: block; font-size: 0.8rem; margin-bottom: 0.25rem; }
+  .modal input, .modal textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; background: var(--bg); color: var(--fg); }
+  .modal input:focus, .modal textarea:focus { outline: none; border-color: var(--accent); }
+  .modal textarea { min-height: 80px; resize: vertical; }
+  .modal.wide { max-width: 560px; }
+
+  /* Intent Form */
+  .intent-field { margin-bottom: 0.75rem; }
+  .intent-field label { display: block; font-size: 0.8rem; font-weight: 500; margin-bottom: 0.25rem; }
+  .intent-field .help { font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem; }
+  .intent-field select, .intent-field input[type="text"], .intent-field textarea {
+    width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.85rem; background: var(--bg); color: var(--fg);
+  }
+  .intent-field input[type="range"] { width: 100%; margin: 0.25rem 0; }
+  .intent-field .range-val { font-size: 0.75rem; color: var(--muted); text-align: right; }
+  .intent-branches { margin-bottom: 0.75rem; }
+  .intent-branch { padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 0.4rem; background: var(--card-bg); }
+  .intent-branch .name { font-size: 0.85rem; font-weight: 500; }
+  .intent-branch .desc { font-size: 0.75rem; color: var(--muted); }
+  .intent-branch .conf-bar { height: 4px; background: var(--border); border-radius: 2px; margin-top: 0.3rem; overflow: hidden; }
+  .intent-branch .conf-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+  .intent-result { padding: 0.75rem; border: 1px solid var(--badge-ok); border-radius: 6px; background: var(--accent-light); font-size: 0.8rem; margin-top: 0.5rem; }
+  .intent-result.has-warnings { border-color: var(--badge-warn); }
+  .intent-btn { padding: 0.35rem 0.6rem; background: var(--card-bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; cursor: pointer; font-size: 0.78rem; margin-right: 0.25rem; }
+  .intent-btn:hover { border-color: var(--muted); }
+  .modal .buttons { display: flex; gap: 0.5rem; margin-top: 1rem; }
+  .modal .buttons button { flex: 1; }
+
+  .hidden { display: none !important; }
+
+  /* Sidebar toggle for mobile */
+  .sidebar-toggle { display: none; position: fixed; bottom: 1rem; right: 1rem; width: 48px; height: 48px; border-radius: 50%; background: var(--accent); color: #fff; border: none; font-size: 1.2rem; cursor: pointer; z-index: 50; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+
+  /* Narrow laptops (e.g. 1366x768) — shrink sidebar */
+  @media (max-width: 1100px) {
+    .app { grid-template-columns: 1fr 260px; }
+  }
+
+  /* Tablets / very small screens — sidebar becomes overlay */
+  @media (max-width: 768px) {
+    .app { grid-template-columns: 1fr; }
+    .governor-panel { display: none; position: fixed; top: 0; right: 0; bottom: 0; width: 340px; background: var(--bg); z-index: 60; border-left: 1px solid var(--border); box-shadow: -4px 0 20px rgba(0,0,0,0.1); }
+    .governor-panel.open { display: flex; }
+    .sidebar-toggle { display: flex; align-items: center; justify-content: center; }
+    .chat-panel { border-right: none; }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .status-banner.ok { background: #14532d; color: #86efac; }
+    .status-banner.warn { background: #78350f; color: #fcd34d; }
+    .status-banner.block { background: #7f1d1d; color: #fca5a5; }
+  }
+
+  /* Welcome state */
+  .welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--muted); text-align: center; padding: 2rem; }
+  .welcome h2 { font-size: 1.2rem; color: var(--fg); margin-bottom: 0.5rem; }
+  .welcome p { font-size: 0.9rem; max-width: 400px; }
+
+  /* Session picker */
+  .session-picker { display: flex; align-items: center; gap: 0.4rem; }
+  .session-select { padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 0.8rem; max-width: 200px; }
+  .new-session-btn { padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 0.85rem; cursor: pointer; line-height: 1; }
+  .new-session-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Export/Import toolbar */
+  .gov-toolbar { display: flex; gap: 0.4rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+  .gov-toolbar button { font-size: 0.75rem; padding: 0.3rem 0.6rem; }
+  .import-file { display: none; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Chat Panel -->
+  <div class="chat-panel">
+    <div class="chat-header">
+      <h1>Governor Chat</h1>
+      <div class="session-picker">
+        <select class="session-select" id="session-select" onchange="switchSession(this.value)">
+          <option value="">Loading...</option>
+        </select>
+        <button class="new-session-btn" onclick="newSession()" title="New conversation">+</button>
+      </div>
+      <select class="model-select" id="model-select" data-testid="model-select">
+        <option value="">Loading models...</option>
+      </select>
+      <span class="backend-badge" id="backend-badge"></span>
+      <a href="/dashboard" style="font-size:0.75rem;color:var(--muted);text-decoration:none;margin-left:0.5rem;" data-testid="nav-dashboard">Dashboard</a>
+    </div>
+
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <h2>Governor Chat</h2>
+        <p>Chat with AI under governor constraints. Your rules are enforced in real time.</p>
+      </div>
+    </div>
+
+    <div class="typing-indicator" id="typing">Generating...</div>
+
+    <div class="chat-input">
+      <textarea id="input" placeholder="Type a message..." rows="1" data-testid="chat-input"></textarea>
+      <button class="intent-btn" onclick="openIntentForm()" data-testid="intent-form-button" title="Intent Form">&#9881;</button>
+      <button id="send-btn" onclick="sendMessage()" data-testid="send">Send</button>
+    </div>
+  </div>
+
+  <!-- Governor Sidebar -->
+  <div class="governor-panel" id="governor-panel">
+    <div class="gov-header">
+      <h2>Governor</h2>
+      <span class="mode-badge" id="mode-badge">Loading...</span>
+    </div>
+
+    <!-- Status Banner -->
+    <div class="status-banner ok" id="status-banner">
+      <span class="icon">&#10003;</span>
+      <span class="text" id="status-text">Everything looks good.</span>
+    </div>
+
+    <!-- Backend Selector -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Backend</h3>
+        <span id="backend-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;"></span>
+      </div>
+      <div class="card-body" style="display:flex;align-items:center;gap:0.5rem;">
+        <select class="model-select" id="backend-select" onchange="switchBackend(this.value)" style="flex:1;">
+          <option value="">Loading...</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Export/Import Toolbar -->
+    <div class="gov-toolbar">
+      <button class="gov-btn primary" onclick="exportAll()">Export All</button>
+      <button class="gov-btn" onclick="exportChatMd()">Chat .md</button>
+      <button class="gov-btn" onclick="exportChatJson()">Chat .json</button>
+      <button class="gov-btn" onclick="document.getElementById('import-file').click()">Import Bible</button>
+      <input type="file" id="import-file" class="import-file" accept=".json" onchange="importGovernorState(this)">
+    </div>
+
+    <!-- Fiction Mode Panel -->
+    <div id="fiction-panel" class="hidden">
+      <!-- Characters -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Characters</h3>
+          <span class="count" id="char-count">0</span>
+        </div>
+        <div class="card-body" id="characters-list">
+          <div class="empty">No characters yet.<br>Add one and I'll remember what's true about them.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('add-char-modal')" style="width: 100%;" data-testid="add-character">+ Add Character</button>
+        </div>
+      </div>
+
+      <!-- World Rules -->
+      <div class="card">
+        <div class="card-header">
+          <h3>World Rules</h3>
+          <span class="count" id="rule-count">0</span>
+        </div>
+        <div class="card-body" id="rules-list">
+          <div class="empty">No rules yet.<br>Tell me how your world works.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('add-rule-modal')" style="width: 100%;">+ Add Rule</button>
+        </div>
+      </div>
+
+      <!-- Forbidden -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Things That Shouldn't Happen</h3>
+          <span class="count" id="forbid-count">0</span>
+        </div>
+        <div class="card-body" id="forbidden-list">
+          <div class="empty">Nothing forbidden yet.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('add-forbid-modal')" style="width: 100%;">+ Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Code Mode Panel -->
+    <div id="code-panel" class="hidden">
+      <!-- Decisions -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Decisions</h3>
+          <span class="count" id="decision-count">0</span>
+        </div>
+        <div class="card-body" id="decisions-list">
+          <div class="empty">No decisions recorded yet.<br>Add one and I'll catch contradictions.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('add-decision-modal')" style="width: 100%;">+ Add Decision</button>
+        </div>
+      </div>
+
+      <!-- Constraints -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Constraints</h3>
+          <span class="count" id="constraint-count">0</span>
+        </div>
+        <div class="card-body" id="constraints-list">
+          <div class="empty">No constraints yet.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('add-constraint-modal')" style="width: 100%;">+ Add Constraint</button>
+        </div>
+      </div>
+
+      <!-- Compare (Code Interferometry) -->
+      <div id="compare-banner" class="hidden" style="background: #3a2a00; border: 1px solid #b08000; border-radius: 8px; padding: 0.75rem; margin: 0.5rem; color: #ffd666;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="font-size: 1.2em;">⚠️</span>
+          <span id="compare-banner-text">Models disagreed.</span>
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+          <button class="gov-btn" onclick="document.getElementById('compare-details').classList.toggle('hidden')" style="flex: 1; font-size: 0.8em;">View Details</button>
+          <button class="gov-btn" onclick="document.getElementById('compare-banner').classList.add('hidden')" style="flex: 1; font-size: 0.8em; background: transparent; border: 1px solid #666;">Dismiss</button>
+        </div>
+      </div>
+      <div class="card" id="compare-details" class="hidden">
+        <div class="card-header">
+          <h3>Compare</h3>
+          <span class="count" id="compare-marker-count">0</span>
+        </div>
+        <div class="card-body" id="compare-body">
+          <div class="empty">No compare results yet.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem; display: flex; gap: 0.5rem;">
+          <input type="text" id="compare-prompt-input" placeholder="Compare prompt..." style="flex:1;padding:0.4rem;border:1px solid var(--border);border-radius:6px;font-size:0.8rem;background:var(--bg);color:var(--fg);" data-testid="compare-prompt">
+          <button class="gov-btn primary" onclick="runCompare()" style="font-size:0.8rem;" data-testid="compare-button">Compare</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Research Mode Panel -->
+    <div id="research-panel" class="hidden">
+      <!-- Claims -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Claims</h3>
+          <span class="count" id="claim-count">0</span>
+        </div>
+        <div class="card-body" id="claims-list">
+          <div class="empty">No claims yet.<br>Register what you're asserting.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('add-claim-modal')" style="width: 100%;">+ Add Claim</button>
+        </div>
+      </div>
+
+      <!-- Assumptions -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Assumptions</h3>
+          <span class="count" id="assumption-count">0</span>
+        </div>
+        <div class="card-body" id="assumptions-list">
+          <div class="empty">No assumptions yet.<br>Surface what you're taking for granted.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('add-assumption-modal')" style="width: 100%;">+ Add Assumption</button>
+        </div>
+      </div>
+
+      <!-- Uncertainties -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Uncertainties</h3>
+          <span class="count" id="uncertainty-count">0</span>
+        </div>
+        <div class="card-body" id="uncertainties-list">
+          <div class="empty">No uncertainties yet.<br>Log what you don't know.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('add-uncertainty-modal')" style="width: 100%;">+ Add Uncertainty</button>
+        </div>
+      </div>
+
+      <!-- Links -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Links</h3>
+          <span class="count" id="link-count">0</span>
+        </div>
+        <div class="card-body" id="links-list">
+          <div class="empty">No links yet.<br>Connect claims with evidence.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('add-link-modal')" style="width: 100%;">+ Add Link</button>
+        </div>
+      </div>
+
+      <!-- Collapse History -->
+      <div class="card">
+        <div class="card-header">
+          <h3>History</h3>
+          <span class="count" id="collapse-count">0</span>
+        </div>
+        <div class="card-body" id="collapse-list">
+          <div class="empty">No collapse events.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Corrections Log (all modes) -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Corrections</h3>
+      </div>
+      <div class="card-body" id="corrections-list">
+        <div class="empty">Nothing yet.<br>When I catch something, it'll show up here.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Sidebar toggle (mobile) -->
+<button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()">&#9776;</button>
+
+<!-- Add Character Modal -->
+<div class="modal-overlay" id="add-char-modal">
+  <div class="modal">
+    <h3>Add Character</h3>
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="char-name" placeholder="Elena">
+    </div>
+    <div class="form-group">
+      <label>What's true about them</label>
+      <textarea id="char-desc" placeholder="Tall, green eyes, grew up in Valencia..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>How they talk and act</label>
+      <input type="text" id="char-voice" placeholder="Formal speech, never uses contractions...">
+    </div>
+    <div class="form-group">
+      <label>Things they wouldn't do</label>
+      <input type="text" id="char-wont" placeholder="Smile warmly, show vulnerability...">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-char-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitCharacter()" data-testid="save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Rule Modal -->
+<div class="modal-overlay" id="add-rule-modal">
+  <div class="modal">
+    <h3>Add World Rule</h3>
+    <div class="form-group">
+      <label>What's true about your world?</label>
+      <textarea id="rule-text" placeholder="Magic requires spoken words. Technology is 1920s level..."></textarea>
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-rule-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitRule()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Forbidden Modal -->
+<div class="modal-overlay" id="add-forbid-modal">
+  <div class="modal">
+    <h3>What shouldn't happen?</h3>
+    <div class="form-group">
+      <label>Describe what you want to avoid</label>
+      <textarea id="forbid-text" placeholder="Graphic violence, modern slang..."></textarea>
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-forbid-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitForbidden()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Decision Modal -->
+<div class="modal-overlay" id="add-decision-modal">
+  <div class="modal">
+    <h3>Record a Decision</h3>
+    <div class="form-group">
+      <label>What did you decide?</label>
+      <input type="text" id="decision-text" placeholder="REST API, not GraphQL">
+    </div>
+    <div class="form-group">
+      <label>Why?</label>
+      <input type="text" id="decision-rationale" placeholder="Simpler, team knows it...">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-decision-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitDecision()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Constraint Modal -->
+<div class="modal-overlay" id="add-constraint-modal">
+  <div class="modal">
+    <h3>Add Constraint</h3>
+    <div class="form-group">
+      <label>What shouldn't happen in the code?</label>
+      <input type="text" id="constraint-text" placeholder="No raw SQL, No Redux...">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-constraint-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitConstraint()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Claim Modal -->
+<div class="modal-overlay" id="add-claim-modal">
+  <div class="modal">
+    <h3>Register a Claim</h3>
+    <div class="form-group">
+      <label>What are you claiming?</label>
+      <textarea id="claim-content" placeholder="Higher temperatures increase reaction rates..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Scope (where does this apply?)</label>
+      <input type="text" id="claim-scope" placeholder="Chapter 3, Methods section...">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-claim-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitClaim()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Assumption Modal -->
+<div class="modal-overlay" id="add-assumption-modal">
+  <div class="modal">
+    <h3>Surface an Assumption</h3>
+    <div class="form-group">
+      <label>What are you assuming?</label>
+      <textarea id="assumption-content" placeholder="Incentive structures remain stable over time..."></textarea>
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-assumption-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitAssumption()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Uncertainty Modal -->
+<div class="modal-overlay" id="add-uncertainty-modal">
+  <div class="modal">
+    <h3>Log an Uncertainty</h3>
+    <div class="form-group">
+      <label>What's uncertain?</label>
+      <textarea id="uncertainty-content" placeholder="Sample size may be insufficient for..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Attached to (claim/assumption ID)</label>
+      <input type="text" id="uncertainty-attached" placeholder="C-ABC123">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-uncertainty-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitUncertainty()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Violation Modal (populated dynamically when violations are detected) -->
+<div class="modal-overlay" id="violation-modal" data-testid="violation-modal">
+  <div class="modal">
+    <h3 id="violation-title">Violation Detected</h3>
+    <div id="violation-body" style="font-size:0.85rem;margin-bottom:0.75rem;"></div>
+    <div class="buttons">
+      <button class="gov-btn primary" onclick="resolveViolation('fix')" data-testid="fix-button">Fix</button>
+      <button class="gov-btn" onclick="resolveViolation('revise')" data-testid="revise-button">Revise</button>
+      <button class="gov-btn" onclick="resolveViolation('proceed')" data-testid="proceed-button">Proceed</button>
+    </div>
+  </div>
+</div>
+
+<!-- Intent Form Modal -->
+<div class="modal-overlay" id="intent-form-modal" data-testid="intent-form-modal">
+  <div class="modal wide">
+    <h3>Intent Form</h3>
+    <div style="margin-bottom:0.5rem;">
+      <select id="intent-template-select" onchange="loadIntentSchema()" style="width:100%;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:0.85rem;" data-testid="intent-template-select">
+      </select>
+    </div>
+    <div id="intent-branches-container" class="intent-branches"></div>
+    <div id="intent-fields-container"></div>
+    <div id="intent-escape-container" style="margin-bottom:0.75rem;display:none;">
+      <label style="font-size:0.8rem;font-weight:500;">Other (escape hatch)</label>
+      <input type="text" id="intent-escape-input" placeholder="Describe what you need..." style="width:100%;padding:0.5rem;border:1px solid var(--border);border-radius:6px;font-size:0.85rem;background:var(--bg);color:var(--fg);" data-testid="intent-escape-input">
+    </div>
+    <div id="intent-result" class="intent-result" style="display:none;" data-testid="intent-result"></div>
+    <div class="buttons" style="margin-top:0.75rem;">
+      <button class="gov-btn" onclick="closeModal('intent-form-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitIntentForm()" data-testid="intent-submit">Compile</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Link Modal -->
+<div class="modal-overlay" id="add-link-modal">
+  <div class="modal">
+    <h3>Add a Link</h3>
+    <div class="form-group">
+      <label>Link Type</label>
+      <select id="link-type" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 0.85rem;">
+        <option value="supports">Supports</option>
+        <option value="contests">Contests</option>
+        <option value="assumes">Assumes</option>
+        <option value="supersedes">Supersedes</option>
+        <option value="narrows">Narrows</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>From ID</label>
+      <input type="text" id="link-from" placeholder="C-ABC123">
+    </div>
+    <div class="form-group">
+      <label>To ID</label>
+      <input type="text" id="link-to" placeholder="C-DEF456">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-link-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitLink()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var mode = 'general';
+  var contextId = 'default';
+  var selectedModel = '';
+  var isGenerating = false;
+  var GOV_REFRESH = 3000;
+  var BASE = window.location.origin;
+
+  // ========== Utilities ==========
+
+  function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function renderMarkdown(text) {
+    var html = text;
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+      return '<pre><code>' + esc(code.trim()) + '</code></pre>';
+    });
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    var blocks = html.split(/\n\n+/);
+    var result = [];
+    for (var i = 0; i < blocks.length; i++) {
+      var block = blocks[i].trim();
+      if (!block) continue;
+      if (block.startsWith('<pre>')) {
+        result.push(block);
+      } else {
+        result.push('<p>' + block.replace(/\n/g, '<br>') + '</p>');
+      }
+    }
+    return result.join('');
+  }
+
+  function truncate(s, n) { return s && s.length > n ? s.substring(0, n) + '...' : s; }
+
+  // ========== Session Manager ==========
+
+  var SM = {
+    currentSessionId: null,
+    sessions: [],
+    conversationMessages: [],
+
+    cacheKey: function() {
+      return 'governor_session_' + contextId + '_' + (SM.currentSessionId || '');
+    },
+
+    cacheToLocal: function() {
+      if (!SM.currentSessionId) return;
+      try {
+        localStorage.setItem(SM.cacheKey(), JSON.stringify({
+          sessionId: SM.currentSessionId,
+          messages: SM.conversationMessages
+        }));
+        localStorage.setItem('governor_last_session_' + contextId, SM.currentSessionId);
+      } catch (e) {}
+    },
+
+    restoreFromLocal: function() {
+      try {
+        var lastId = localStorage.getItem('governor_last_session_' + contextId);
+        if (!lastId) return false;
+        var cached = localStorage.getItem('governor_session_' + contextId + '_' + lastId);
+        if (!cached) return false;
+        var data = JSON.parse(cached);
+        SM.currentSessionId = data.sessionId;
+        SM.conversationMessages = data.messages || [];
+        return true;
+      } catch (e) { return false; }
+    },
+
+    saveMessage: function(msg) {
+      SM.conversationMessages.push(msg);
+      SM.cacheToLocal();
+      // Fire-and-forget write-through to server
+      if (SM.currentSessionId) {
+        fetch(BASE + '/sessions/' + SM.currentSessionId + '/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(msg)
+        }).catch(function() {});
+      }
+    },
+
+    createSession: function(title) {
+      return fetch(BASE + '/sessions/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: selectedModel, title: title || 'New conversation' })
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        SM.currentSessionId = data.id;
+        SM.conversationMessages = [];
+        SM.cacheToLocal();
+        SM.refreshSessionList();
+        return data;
+      });
+    },
+
+    loadSession: function(sessionId) {
+      // Try localStorage first
+      try {
+        var cached = localStorage.getItem('governor_session_' + contextId + '_' + sessionId);
+        if (cached) {
+          var data = JSON.parse(cached);
+          if (data.messages && data.messages.length > 0) {
+            SM.currentSessionId = sessionId;
+            SM.conversationMessages = data.messages;
+            renderConversation();
+            localStorage.setItem('governor_last_session_' + contextId, sessionId);
+            return Promise.resolve();
+          }
+        }
+      } catch (e) {}
+
+      // Fallback to server
+      return fetch(BASE + '/sessions/' + sessionId).then(function(r) {
+        if (!r.ok) throw new Error('Session not found');
+        return r.json();
+      }).then(function(data) {
+        SM.currentSessionId = data.id;
+        SM.conversationMessages = (data.messages || []).map(function(m) {
+          return { role: m.role, content: m.content };
+        });
+        SM.cacheToLocal();
+        renderConversation();
+      });
+    },
+
+    listSessions: function() {
+      return fetch(BASE + '/sessions/').then(function(r) { return r.json(); }).then(function(data) {
+        SM.sessions = data.sessions || [];
+        return SM.sessions;
+      }).catch(function() { return []; });
+    },
+
+    deleteSession: function(sessionId) {
+      return fetch(BASE + '/sessions/' + sessionId, { method: 'DELETE' })
+        .then(function() {
+          try { localStorage.removeItem('governor_session_' + contextId + '_' + sessionId); } catch(e) {}
+          SM.refreshSessionList();
+        });
+    },
+
+    refreshSessionList: function() {
+      SM.listSessions().then(function(sessions) {
+        var select = document.getElementById('session-select');
+        select.innerHTML = '';
+        for (var i = 0; i < sessions.length; i++) {
+          var s = sessions[i];
+          var opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = truncate(s.title, 30);
+          if (s.id === SM.currentSessionId) opt.selected = true;
+          select.appendChild(opt);
+        }
+        if (sessions.length === 0) {
+          var opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No sessions';
+          select.appendChild(opt);
+        }
+      });
+    }
+  };
+
+  // ========== Chat ==========
+
+  function clearMessages() {
+    var messagesEl = document.getElementById('messages');
+    messagesEl.innerHTML = '<div class="welcome" id="welcome"><h2>Governor Chat</h2><p>Chat with AI under governor constraints. Your rules are enforced in real time.</p></div>';
+  }
+
+  function addMessage(role, content) {
+    var welcome = document.getElementById('welcome');
+    if (welcome) welcome.remove();
+
+    var messagesEl = document.getElementById('messages');
+    var msgDiv = document.createElement('div');
+    msgDiv.className = 'message ' + role;
+
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    if (role === 'user') {
+      bubble.textContent = content;
+    } else {
+      bubble.innerHTML = renderMarkdown(content);
+    }
+
+    msgDiv.appendChild(bubble);
+    messagesEl.appendChild(msgDiv);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return bubble;
+  }
+
+  function renderConversation() {
+    clearMessages();
+    for (var i = 0; i < SM.conversationMessages.length; i++) {
+      var m = SM.conversationMessages[i];
+      addMessage(m.role, m.content);
+    }
+  }
+
+  window.sendMessage = function() {
+    var input = document.getElementById('input');
+    var text = input.value.trim();
+    if (!text || isGenerating) return;
+
+    // Auto-title on first message
+    if (SM.conversationMessages.length === 0 && SM.currentSessionId) {
+      var title = truncate(text, 50);
+      fetch(BASE + '/sessions/' + SM.currentSessionId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title })
+      }).then(function() { SM.refreshSessionList(); }).catch(function() {});
+    }
+
+    addMessage('user', text);
+    SM.saveMessage({ role: 'user', content: text });
+    input.value = '';
+    input.style.height = 'auto';
+
+    var model = document.getElementById('model-select').value;
+    streamResponse(model);
+  };
+
+  window.switchSession = function(sessionId) {
+    if (!sessionId || sessionId === SM.currentSessionId) return;
+    SM.loadSession(sessionId).catch(function() {});
+  };
+
+  window.newSession = function() {
+    SM.createSession('New conversation').then(function() {
+      clearMessages();
+      SM.refreshSessionList();
+    }).catch(function() {});
+  };
+
+  function streamResponse(model) {
+    isGenerating = true;
+    document.getElementById('send-btn').disabled = true;
+    document.getElementById('typing').classList.add('active');
+
+    var bubble = addMessage('assistant', '');
+    var accumulated = '';
+
+    // Send full conversation history (multi-turn fix)
+    var payload = {
+      model: model || 'sonnet',
+      messages: SM.conversationMessages.map(function(m) {
+        return { role: m.role, content: m.content };
+      }),
+      stream: true
+    };
+
+    fetch(BASE + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function(response) {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function pump() {
+        return reader.read().then(function(result) {
+          if (result.done) {
+            finishGeneration(accumulated);
+            return;
+          }
+
+          buffer += decoder.decode(result.value, { stream: true });
+          var lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line.startsWith('data: ')) continue;
+            var data = line.slice(6);
+            if (data === '[DONE]') {
+              finishGeneration(accumulated);
+              return;
+            }
+            try {
+              var parsed = JSON.parse(data);
+              if (parsed.error) {
+                accumulated += '\n\n[Error] ' + (parsed.error.message || 'Unknown error');
+                bubble.innerHTML = '<p style="color: var(--badge-block);">' + esc(accumulated) + '</p>';
+                finishGeneration(accumulated);
+                return;
+              }
+              var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+              if (delta && delta.content) {
+                accumulated += delta.content;
+                bubble.innerHTML = renderMarkdown(accumulated);
+                document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+              }
+              if (parsed.choices && parsed.choices[0] && parsed.choices[0].finish_reason) {
+                finishGeneration(accumulated);
+                return;
+              }
+            } catch (e) {}
+          }
+
+          return pump();
+        });
+      }
+
+      return pump();
+    }).catch(function(err) {
+      if (!accumulated) {
+        bubble.innerHTML = '<p style="color: var(--badge-block);">Error: ' + esc(err.message) + '</p>';
+      }
+      finishGeneration(accumulated);
+    });
+  }
+
+  function finishGeneration(content) {
+    isGenerating = false;
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('typing').classList.remove('active');
+    if (content) {
+      SM.saveMessage({ role: 'assistant', content: content });
+    }
+    refreshGovernor();
+  }
+
+  // Textarea auto-resize and enter-to-send
+  var inputEl = document.getElementById('input');
+  inputEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+  inputEl.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  });
+
+  // ========== Models ==========
+
+  function loadModels() {
+    fetch(BASE + '/v1/models').then(function(r) { return r.json(); }).then(function(data) {
+      var select = document.getElementById('model-select');
+      select.innerHTML = '';
+      var models = data.data || [];
+      for (var i = 0; i < models.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = models[i].id;
+        opt.textContent = models[i].id;
+        select.appendChild(opt);
+      }
+      if (models.length > 0) selectedModel = models[0].id;
+    }).catch(function() {
+      var select = document.getElementById('model-select');
+      select.innerHTML = '<option value="sonnet">sonnet</option>';
+    });
+  }
+
+  // ========== Backends ==========
+
+  function loadBackends() {
+    fetch(BASE + '/v1/backends').then(function(r) { return r.json(); }).then(function(data) {
+      var select = document.getElementById('backend-select');
+      select.innerHTML = '';
+      var backends = data.backends || [];
+      for (var i = 0; i < backends.length; i++) {
+        var b = backends[i];
+        var opt = document.createElement('option');
+        opt.value = b.type;
+        opt.textContent = b.type + (b.available ? '' : ' (unavailable)');
+        opt.disabled = !b.available;
+        if (b.active) opt.selected = true;
+        select.appendChild(opt);
+      }
+      var dot = document.getElementById('backend-dot');
+      dot.style.background = data.connected ? '#22c55e' : '#ef4444';
+    }).catch(function() {});
+  }
+
+  window.switchBackend = function(value) {
+    if (!value) return;
+    fetch(BASE + '/v1/backends/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backend_type: value })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.success) {
+        loadModels();
+        loadBackends();
+        document.getElementById('backend-badge').textContent = data.backend_type;
+      }
+    }).catch(function() {});
+  };
+
+  // ========== Governor Sidebar ==========
+
+  function setMode(m) {
+    mode = m;
+    document.getElementById('mode-badge').textContent = m.charAt(0).toUpperCase() + m.slice(1);
+    document.getElementById('fiction-panel').classList.toggle('hidden', m !== 'fiction');
+    document.getElementById('code-panel').classList.toggle('hidden', m !== 'code');
+    document.getElementById('research-panel').classList.toggle('hidden', m !== 'research');
+  }
+
+  function setStatus(status, text) {
+    var banner = document.getElementById('status-banner');
+    banner.className = 'status-banner ' + (status === 'ok' ? 'ok' : status === 'needs_attention' ? 'warn' : 'block');
+    banner.querySelector('.icon').textContent = status === 'ok' ? '\u2713' : '\u26A0';
+    document.getElementById('status-text').textContent = text || (status === 'ok' ? 'Everything looks good.' : 'Needs attention.');
+  }
+
+  function renderCharacters(chars) {
+    var el = document.getElementById('characters-list');
+    document.getElementById('char-count').textContent = chars.length;
+    if (chars.length === 0) {
+      el.innerHTML = '<div class="empty">No characters yet.<br>Add one and I\'ll remember what\'s true about them.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < chars.length; i++) {
+      var c = chars[i];
+      html += '<div class="item"><div class="item-title">' + esc(c.name) + '</div>';
+      if (c.description) html += '<div class="item-detail">' + esc(c.description) + '</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderRules(rules) {
+    var el = document.getElementById('rules-list');
+    document.getElementById('rule-count').textContent = rules.length;
+    if (rules.length === 0) { el.innerHTML = '<div class="empty">No rules yet.</div>'; return; }
+    var html = '';
+    for (var i = 0; i < rules.length; i++) {
+      html += '<div class="item"><div class="item-detail">' + esc(rules[i].rule) + '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderForbidden(list) {
+    var el = document.getElementById('forbidden-list');
+    document.getElementById('forbid-count').textContent = list.length;
+    if (list.length === 0) { el.innerHTML = '<div class="empty">Nothing forbidden yet.</div>'; return; }
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      html += '<div class="item"><div class="item-detail">' + esc(list[i].description) + '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderDecisions(list) {
+    var el = document.getElementById('decisions-list');
+    document.getElementById('decision-count').textContent = list.length;
+    if (list.length === 0) { el.innerHTML = '<div class="empty">No decisions recorded yet.</div>'; return; }
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      var d = list[i];
+      html += '<div class="item"><div class="item-title">' + esc(d.topic) + ': ' + esc(d.choice) + '</div>';
+      if (d.rationale) html += '<div class="item-detail">"' + esc(d.rationale) + '"</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderConstraints(list) {
+    var el = document.getElementById('constraints-list');
+    document.getElementById('constraint-count').textContent = list.length;
+    if (list.length === 0) { el.innerHTML = '<div class="empty">No constraints yet.</div>'; return; }
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      html += '<div class="item"><div class="item-detail">' + esc(list[i].description) + '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  // ========== Compare (Code Interferometry) ==========
+
+  function renderCompare(report) {
+    var banner = document.getElementById('compare-banner');
+    var details = document.getElementById('compare-details');
+    var body = document.getElementById('compare-body');
+    var countEl = document.getElementById('compare-marker-count');
+
+    if (!report) {
+      banner.classList.add('hidden');
+      details.classList.add('hidden');
+      body.innerHTML = '<div class="empty">No compare results yet.</div>';
+      countEl.textContent = '0';
+      return;
+    }
+
+    var markers = report.risk_marker_union || [];
+    var conflicts = report.anchor_conflicts || [];
+    countEl.textContent = markers.length;
+
+    // Show banner if tier >= 1
+    if (report.tier >= 1) {
+      var bannerParts = [];
+      var secCount = markers.filter(function(m) { return m.category === 'security'; }).length;
+      var edgeCount = markers.filter(function(m) { return m.category === 'edge_case'; }).length;
+      if (secCount) bannerParts.push(secCount + ' security marker' + (secCount !== 1 ? 's' : ''));
+      if (edgeCount) bannerParts.push(edgeCount + ' edge-case marker' + (edgeCount !== 1 ? 's' : ''));
+      if (conflicts.length) bannerParts.push(conflicts.length + ' anchor conflict' + (conflicts.length !== 1 ? 's' : ''));
+      var text = 'Models disagreed. ' + (bannerParts.length ? bannerParts.join('. ') + '.' : '');
+      document.getElementById('compare-banner-text').textContent = text;
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
+
+    // Render details card
+    details.classList.remove('hidden');
+    var html = '';
+    if (markers.length === 0 && conflicts.length === 0) {
+      html = '<div class="empty">No risk markers or anchor conflicts.</div>';
+    } else {
+      html += '<div style="font-size: 0.8em; color: #999; margin-bottom: 0.5rem;">Union lens — flagged by any model</div>';
+      for (var i = 0; i < markers.length; i++) {
+        var m = markers[i];
+        var icon = m.category === 'security' ? '🔴' : '🟡';
+        html += '<div class="item">';
+        html += '<div class="item-name">' + icon + ' ' + esc(m.marker_type) + '</div>';
+        html += '<div class="item-detail">' + esc(m.message) + ' <span style="color:#666">(' + esc(m.model_id) + ')</span></div>';
+        html += '</div>';
+      }
+      for (var j = 0; j < conflicts.length; j++) {
+        var c = conflicts[j];
+        var cIcon = c.conflict_type === 'hard' ? '⛔' : '⚠️';
+        html += '<div class="item">';
+        html += '<div class="item-name">' + cIcon + ' ' + esc(c.anchor_id) + ' (' + esc(c.conflict_type) + ')</div>';
+        html += '<div class="item-detail">' + esc(c.description) + '</div>';
+        html += '</div>';
+      }
+    }
+    body.innerHTML = html;
+  }
+
+  // ========== Research Mode Render ==========
+
+  var researchStatusIcons = {
+    floating: '\u25CB',     // ○
+    supported: '\u25CF',    // ●
+    contested: '\u25D1',    // ◑
+    retracted: '\u2715',    // ✕
+    superseded: '\u2715'    // ✕
+  };
+  var assumptionIcons = { proposed: '?', accepted: '\u2713', deprecated: '\u2715' };
+  var uncertaintyIcons = { open: '~', resolved: '\u2713', collapsed: '\u26A0' };
+
+  function renderResearchPanel(state) {
+    renderClaims(state.claims || []);
+    renderAssumptions(state.assumptions || []);
+    renderUncertainties(state.uncertainties || []);
+    renderLinks(state.links || []);
+    renderCollapseHistory(state.collapse_events || []);
+
+    // Update ED banner
+    var ed = state.ed || {};
+    var total = ed.total || 0;
+    var floating = ed.floating || 0;
+    var uncertain = ed.open_uncertain || 0;
+    setStatus(
+      total === 0 ? 'ok' : total <= 10 ? 'needs_attention' : 'block',
+      'ED: ' + total + ' | ' + floating + ' floating | ' + uncertain + ' uncertain'
+    );
+  }
+
+  function renderClaims(claims) {
+    var el = document.getElementById('claims-list');
+    document.getElementById('claim-count').textContent = claims.length;
+    if (claims.length === 0) {
+      el.innerHTML = '<div class="empty">No claims yet.<br>Register what you\'re asserting.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < claims.length; i++) {
+      var c = claims[i];
+      var icon = researchStatusIcons[c.status] || '\u25CB';
+      html += '<div class="item">';
+      html += '<div class="item-title">' + icon + ' ' + esc(c.id) + ' ' + esc(truncate(c.content, 60)) + '</div>';
+      if (c.scope) html += '<div class="item-detail">Scope: ' + esc(c.scope) + '</div>';
+      html += '<div class="item-detail" style="display:flex;gap:0.3rem;margin-top:0.3rem;">';
+      html += '<select onchange="changeResearchStatus(\'claims\',\'' + esc(c.id) + '\',this.value)" style="font-size:0.75rem;padding:0.1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);">';
+      var statuses = ['floating','supported','contested','retracted','superseded'];
+      for (var j = 0; j < statuses.length; j++) {
+        html += '<option value="' + statuses[j] + '"' + (c.status === statuses[j] ? ' selected' : '') + '>' + statuses[j] + '</option>';
+      }
+      html += '</select>';
+      html += '<button onclick="deleteResearchItem(\'claims\',\'' + esc(c.id) + '\')" style="font-size:0.7rem;color:var(--muted);cursor:pointer;background:none;border:none;">\u2715</button>';
+      html += '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderAssumptions(assumptions) {
+    var el = document.getElementById('assumptions-list');
+    document.getElementById('assumption-count').textContent = assumptions.length;
+    if (assumptions.length === 0) {
+      el.innerHTML = '<div class="empty">No assumptions yet.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < assumptions.length; i++) {
+      var a = assumptions[i];
+      var icon = assumptionIcons[a.status] || '?';
+      html += '<div class="item">';
+      html += '<div class="item-title">' + icon + ' ' + esc(a.id) + ' ' + esc(truncate(a.content, 60)) + '</div>';
+      html += '<div class="item-detail" style="display:flex;gap:0.3rem;margin-top:0.3rem;">';
+      html += '<select onchange="changeResearchStatus(\'assumptions\',\'' + esc(a.id) + '\',this.value)" style="font-size:0.75rem;padding:0.1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);">';
+      var aStatuses = ['proposed','accepted','deprecated'];
+      for (var j = 0; j < aStatuses.length; j++) {
+        html += '<option value="' + aStatuses[j] + '"' + (a.status === aStatuses[j] ? ' selected' : '') + '>' + aStatuses[j] + '</option>';
+      }
+      html += '</select>';
+      html += '<button onclick="deleteResearchItem(\'assumptions\',\'' + esc(a.id) + '\')" style="font-size:0.7rem;color:var(--muted);cursor:pointer;background:none;border:none;">\u2715</button>';
+      html += '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderUncertainties(uncertainties) {
+    var el = document.getElementById('uncertainties-list');
+    document.getElementById('uncertainty-count').textContent = uncertainties.length;
+    if (uncertainties.length === 0) {
+      el.innerHTML = '<div class="empty">No uncertainties yet.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < uncertainties.length; i++) {
+      var u = uncertainties[i];
+      var icon = uncertaintyIcons[u.status] || '~';
+      html += '<div class="item">';
+      html += '<div class="item-title">' + icon + ' ' + esc(u.id) + ' ' + esc(truncate(u.content, 60)) + '</div>';
+      if (u.attached_to) html += '<div class="item-detail">Attached to: ' + esc(u.attached_to) + '</div>';
+      html += '<div class="item-detail" style="display:flex;gap:0.3rem;margin-top:0.3rem;">';
+      html += '<select onchange="changeResearchStatus(\'uncertainties\',\'' + esc(u.id) + '\',this.value)" style="font-size:0.75rem;padding:0.1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);">';
+      var uStatuses = ['open','resolved','collapsed'];
+      for (var j = 0; j < uStatuses.length; j++) {
+        html += '<option value="' + uStatuses[j] + '"' + (u.status === uStatuses[j] ? ' selected' : '') + '>' + uStatuses[j] + '</option>';
+      }
+      html += '</select>';
+      html += '<button onclick="deleteResearchItem(\'uncertainties\',\'' + esc(u.id) + '\')" style="font-size:0.7rem;color:var(--muted);cursor:pointer;background:none;border:none;">\u2715</button>';
+      html += '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderLinks(links) {
+    var el = document.getElementById('links-list');
+    document.getElementById('link-count').textContent = links.length;
+    if (links.length === 0) {
+      el.innerHTML = '<div class="empty">No links yet.</div>';
+      return;
+    }
+    var arrows = { supports: '\u2190supports\u2014', contests: '\u2190contests\u2014', assumes: '\u2190assumes\u2014', supersedes: '\u2190supersedes\u2014', narrows: '\u2190narrows\u2014' };
+    var html = '';
+    for (var i = 0; i < links.length; i++) {
+      var l = links[i];
+      var arrow = arrows[l.link_type] || l.link_type;
+      html += '<div class="item">';
+      html += '<div class="item-detail">' + esc(l.to_id) + ' ' + arrow + ' ' + esc(l.from_id) + '</div>';
+      html += '<button onclick="deleteResearchItem(\'links\',\'' + esc(l.id) + '\')" style="font-size:0.7rem;color:var(--muted);cursor:pointer;background:none;border:none;">\u2715</button>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderCollapseHistory(events) {
+    var el = document.getElementById('collapse-list');
+    document.getElementById('collapse-count').textContent = events.length;
+    if (events.length === 0) {
+      el.innerHTML = '<div class="empty">No collapse events.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < events.length; i++) {
+      var e = events[i];
+      html += '<div class="item"><div class="item-detail">\u26A0 ' + esc(e.description || e.claim_id) + '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  // ========== Research Actions ==========
+
+  window.submitClaim = function() {
+    var data = {
+      content: document.getElementById('claim-content').value,
+      scope: document.getElementById('claim-scope').value
+    };
+    fetch(BASE + '/governor/research/claims', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    }).then(function() {
+      closeModal('add-claim-modal');
+      document.getElementById('claim-content').value = '';
+      document.getElementById('claim-scope').value = '';
+      refreshGovernor();
+    });
+  };
+
+  window.submitAssumption = function() {
+    fetch(BASE + '/governor/research/assumptions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: document.getElementById('assumption-content').value })
+    }).then(function() {
+      closeModal('add-assumption-modal');
+      document.getElementById('assumption-content').value = '';
+      refreshGovernor();
+    });
+  };
+
+  window.submitUncertainty = function() {
+    fetch(BASE + '/governor/research/uncertainties', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: document.getElementById('uncertainty-content').value,
+        attached_to: document.getElementById('uncertainty-attached').value
+      })
+    }).then(function() {
+      closeModal('add-uncertainty-modal');
+      document.getElementById('uncertainty-content').value = '';
+      document.getElementById('uncertainty-attached').value = '';
+      refreshGovernor();
+    });
+  };
+
+  window.submitLink = function() {
+    fetch(BASE + '/governor/research/links', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        link_type: document.getElementById('link-type').value,
+        from_id: document.getElementById('link-from').value,
+        to_id: document.getElementById('link-to').value
+      })
+    }).then(function() {
+      closeModal('add-link-modal');
+      document.getElementById('link-from').value = '';
+      document.getElementById('link-to').value = '';
+      refreshGovernor();
+    });
+  };
+
+  window.deleteResearchItem = function(type, id) {
+    if (!confirm('Delete ' + id + '?')) return;
+    fetch(BASE + '/governor/research/' + type + '/' + id, { method: 'DELETE' })
+      .then(function() { refreshGovernor(); });
+  };
+
+  window.changeResearchStatus = function(type, id, status) {
+    fetch(BASE + '/governor/research/' + type + '/' + id + '/status', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: status })
+    }).then(function() { refreshGovernor(); });
+  };
+
+  function renderCorrections(list) {
+    var el = document.getElementById('corrections-list');
+    if (list.length === 0) {
+      el.innerHTML = '<div class="empty">Nothing yet.<br>When I catch something, it\'ll show up here.</div>';
+      return;
+    }
+    var icons = { fix: '\uD83D\uDD04', revise: '\u270E', proceed: '\u2713' };
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      var icon = icons[c.action] || '\u2022';
+      html += '<div class="correction"><span class="correction-icon">' + icon + '</span>';
+      html += '<span class="correction-text">' + esc(c.summary || c.anchor_id) + '</span></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function refreshGovernor() {
+    fetch(BASE + '/governor/status').then(function(r) { return r.json(); }).then(function(data) {
+      setMode(data.mode || 'general');
+      document.getElementById('backend-badge').textContent = data.has_governor ? 'Governor active' : '';
+    }).catch(function() {});
+
+    fetch(BASE + '/governor/now').then(function(r) { return r.json(); }).then(function(data) {
+      setStatus(data.status, data.sentence);
+    }).catch(function() {});
+
+    if (mode === 'fiction') {
+      Promise.all([
+        fetch(BASE + '/governor/fiction/characters').then(function(r) { return r.json(); }),
+        fetch(BASE + '/governor/fiction/world-rules').then(function(r) { return r.json(); }),
+        fetch(BASE + '/governor/fiction/forbidden').then(function(r) { return r.json(); })
+      ]).then(function(results) {
+        renderCharacters(results[0].characters || []);
+        renderRules(results[1].rules || []);
+        renderForbidden(results[2].forbidden || []);
+      }).catch(function() {});
+    }
+    if (mode === 'code') {
+      Promise.all([
+        fetch(BASE + '/governor/code/decisions').then(function(r) { return r.json(); }),
+        fetch(BASE + '/governor/code/constraints').then(function(r) { return r.json(); }),
+        fetch(BASE + '/governor/code/compare/last').then(function(r) { return r.json(); })
+      ]).then(function(results) {
+        renderDecisions(results[0].decisions || []);
+        renderConstraints(results[1].constraints || []);
+        renderCompare(results[2].report || null);
+      }).catch(function() {});
+    }
+    if (mode === 'research') {
+      fetch(BASE + '/governor/research/state').then(function(r) { return r.json(); }).then(function(state) {
+        renderResearchPanel(state);
+      }).catch(function() {});
+    }
+
+    fetch(BASE + '/governor/corrections').then(function(r) { return r.json(); }).then(function(data) {
+      renderCorrections(data.corrections || []);
+    }).catch(function() {});
+  }
+
+  // ========== Modal Helpers ==========
+
+  window.openModal = function(id) { document.getElementById(id).classList.add('open'); };
+  window.closeModal = function(id) { document.getElementById(id).classList.remove('open'); };
+
+  // ========== Intent Form ==========
+  var _intentSchema = null;
+  var _intentTemplates = [];
+
+  window.openIntentForm = function() {
+    // Load templates if not cached
+    if (_intentTemplates.length === 0) {
+      fetch(BASE + '/v2/intent/templates').then(function(r) { return r.json(); }).then(function(data) {
+        _intentTemplates = data.templates || [];
+        var sel = document.getElementById('intent-template-select');
+        sel.innerHTML = '';
+        _intentTemplates.forEach(function(t) {
+          var opt = document.createElement('option');
+          opt.value = t.name;
+          opt.textContent = t.name.replace(/_/g, ' ');
+          opt.title = t.description;
+          sel.appendChild(opt);
+        });
+        loadIntentSchema();
+      });
+    }
+    document.getElementById('intent-result').style.display = 'none';
+    openModal('intent-form-modal');
+  };
+
+  window.loadIntentSchema = function() {
+    var tpl = document.getElementById('intent-template-select').value;
+    if (!tpl) return;
+    fetch(BASE + '/v2/intent/schema/' + tpl).then(function(r) { return r.json(); }).then(function(schema) {
+      _intentSchema = schema;
+      renderIntentFields(schema);
+      renderIntentBranches(schema);
+      var escC = document.getElementById('intent-escape-container');
+      escC.style.display = schema.escape_enabled ? 'block' : 'none';
+    });
+  };
+
+  function renderIntentFields(schema) {
+    var c = document.getElementById('intent-fields-container');
+    c.innerHTML = '';
+    (schema.fields || []).forEach(function(f) {
+      var div = document.createElement('div');
+      div.className = 'intent-field';
+      div.setAttribute('data-testid', 'intent-field-' + f.field_id);
+      var lbl = '<label>' + esc(f.label) + (f.required ? ' *' : '') + '</label>';
+      var input = '';
+      if (f.widget === 'select_one') {
+        input = '<select id="if-' + f.field_id + '">';
+        (f.options || []).forEach(function(o) {
+          var sel = (f.default === o.value) ? ' selected' : '';
+          input += '<option value="' + esc(o.value) + '"' + sel + '>' + esc(o.label) + '</option>';
+        });
+        input += '</select>';
+      } else if (f.widget === 'select_many') {
+        (f.options || []).forEach(function(o) {
+          input += '<label style="display:block;font-size:0.8rem;"><input type="checkbox" value="' + esc(o.value) + '"> ' + esc(o.label) + '</label>';
+        });
+        input = '<div id="if-' + f.field_id + '">' + input + '</div>';
+      } else if (f.widget === 'slider') {
+        var lo = f.range ? f.range[0] : 0, hi = f.range ? f.range[1] : 100;
+        var def = f.default || lo;
+        input = '<input type="range" id="if-' + f.field_id + '" min="' + lo + '" max="' + hi + '" value="' + def + '" oninput="document.getElementById(\'rv-' + f.field_id + '\').textContent=this.value">';
+        input += '<div class="range-val" id="rv-' + f.field_id + '">' + def + '</div>';
+      } else if (f.widget === 'text_long') {
+        var def2 = f.default || '';
+        input = '<textarea id="if-' + f.field_id + '" rows="3">' + esc(def2) + '</textarea>';
+      } else if (f.widget === 'confirmation') {
+        var chk = f.default ? ' checked' : '';
+        input = '<label style="font-size:0.8rem;"><input type="checkbox" id="if-' + f.field_id + '"' + chk + '> ' + esc(f.label) + '</label>';
+      } else {
+        var def3 = f.default || '';
+        input = '<input type="text" id="if-' + f.field_id + '" value="' + esc(String(def3)) + '">';
+      }
+      var help = f.help_text ? '<div class="help">' + esc(f.help_text) + '</div>' : '';
+      div.innerHTML = lbl + input + help;
+      c.appendChild(div);
+    });
+  }
+
+  function renderIntentBranches(schema) {
+    var c = document.getElementById('intent-branches-container');
+    c.innerHTML = '';
+    if (!schema.branches || schema.branches.length === 0) return;
+    schema.branches.forEach(function(b) {
+      var pct = Math.round(b.confidence * 100);
+      c.innerHTML += '<div class="intent-branch">' +
+        '<div class="name">' + esc(b.name) + ' <span style="font-size:0.7rem;color:var(--muted);">' + pct + '%</span></div>' +
+        '<div class="desc">' + esc(b.description) + '</div>' +
+        '<div class="conf-bar"><div class="conf-fill" style="width:' + pct + '%;"></div></div>' +
+        '</div>';
+    });
+  }
+
+  function collectIntentValues() {
+    if (!_intentSchema) return {};
+    var vals = {};
+    (_intentSchema.fields || []).forEach(function(f) {
+      var el = document.getElementById('if-' + f.field_id);
+      if (!el) return;
+      if (f.widget === 'select_one' || f.widget === 'text_short') {
+        vals[f.field_id] = el.value;
+      } else if (f.widget === 'text_long') {
+        vals[f.field_id] = el.value;
+      } else if (f.widget === 'slider') {
+        vals[f.field_id] = parseFloat(el.value);
+      } else if (f.widget === 'confirmation') {
+        vals[f.field_id] = el.checked;
+      } else if (f.widget === 'select_many') {
+        var checks = el.querySelectorAll('input[type=checkbox]:checked');
+        vals[f.field_id] = Array.from(checks).map(function(c) { return c.value; });
+      } else {
+        vals[f.field_id] = el.value;
+      }
+    });
+    return vals;
+  }
+
+  window.submitIntentForm = function() {
+    if (!_intentSchema) return;
+    var values = collectIntentValues();
+    var escapeText = document.getElementById('intent-escape-input').value || null;
+    var tpl = document.getElementById('intent-template-select').value;
+    fetch(BASE + '/v2/intent/compile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schema_id: _intentSchema.schema_id,
+        values: values,
+        escape_text: escapeText,
+        template_name: tpl
+      })
+    }).then(function(r) { return r.json(); }).then(function(result) {
+      var rd = document.getElementById('intent-result');
+      rd.style.display = 'block';
+      var cls = (result.warnings && result.warnings.length > 0) ? 'intent-result has-warnings' : 'intent-result';
+      rd.className = cls;
+      var html = '<strong>Profile:</strong> ' + esc(result.intent_profile);
+      if (result.intent_scope) html += '<br><strong>Scope:</strong> ' + esc(result.intent_scope.join(', '));
+      if (result.intent_timebox_minutes) html += '<br><strong>Timebox:</strong> ' + result.intent_timebox_minutes + 'm';
+      if (result.escape_classification) html += '<br><strong>Escape:</strong> ' + esc(result.escape_classification);
+      if (result.warnings && result.warnings.length > 0) html += '<br><strong>Warnings:</strong> ' + result.warnings.map(esc).join('; ');
+      html += '<br><span style="font-size:0.7rem;color:var(--muted);">Receipt: ' + result.receipt_hash.substring(0, 12) + '...</span>';
+      rd.innerHTML = html;
+    }).catch(function(err) {
+      var rd = document.getElementById('intent-result');
+      rd.style.display = 'block';
+      rd.className = 'intent-result has-warnings';
+      rd.innerHTML = '<strong>Error:</strong> ' + esc(String(err));
+    });
+  };
+
+  window.submitCharacter = function() {
+    var data = {
+      name: document.getElementById('char-name').value,
+      description: document.getElementById('char-desc').value,
+      voice: document.getElementById('char-voice').value,
+      wont: document.getElementById('char-wont').value
+    };
+    fetch(BASE + '/governor/fiction/characters', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    }).then(function() {
+      closeModal('add-char-modal');
+      document.getElementById('char-name').value = '';
+      document.getElementById('char-desc').value = '';
+      document.getElementById('char-voice').value = '';
+      document.getElementById('char-wont').value = '';
+      refreshGovernor();
+    });
+  };
+
+  window.submitRule = function() {
+    fetch(BASE + '/governor/fiction/world-rules', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rule: document.getElementById('rule-text').value })
+    }).then(function() {
+      closeModal('add-rule-modal');
+      document.getElementById('rule-text').value = '';
+      refreshGovernor();
+    });
+  };
+
+  window.submitForbidden = function() {
+    fetch(BASE + '/governor/fiction/forbidden', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: document.getElementById('forbid-text').value })
+    }).then(function() {
+      closeModal('add-forbid-modal');
+      document.getElementById('forbid-text').value = '';
+      refreshGovernor();
+    });
+  };
+
+  window.submitDecision = function() {
+    fetch(BASE + '/governor/code/decisions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        decision: document.getElementById('decision-text').value,
+        rationale: document.getElementById('decision-rationale').value
+      })
+    }).then(function() {
+      closeModal('add-decision-modal');
+      document.getElementById('decision-text').value = '';
+      document.getElementById('decision-rationale').value = '';
+      refreshGovernor();
+    });
+  };
+
+  window.submitConstraint = function() {
+    fetch(BASE + '/governor/code/constraints', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ constraint: document.getElementById('constraint-text').value })
+    }).then(function() {
+      closeModal('add-constraint-modal');
+      document.getElementById('constraint-text').value = '';
+      refreshGovernor();
+    });
+  };
+
+  // ========== Compare ==========
+
+  window.runCompare = function() {
+    var promptEl = document.getElementById('compare-prompt-input');
+    var prompt = promptEl ? promptEl.value.trim() : '';
+    if (!prompt) return;
+    fetch(BASE + '/governor/code/compare', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: prompt, backends: '' })
+    }).then(function() { refreshGovernor(); }).catch(function() {});
+  };
+
+  // ========== Violation Resolution ==========
+
+  window.resolveViolation = function(action) {
+    closeModal('violation-modal');
+    if (action) {
+      var input = document.getElementById('input');
+      input.value = action;
+      sendMessage();
+    }
+  };
+
+  // ========== Sidebar Toggle (mobile) ==========
+
+  window.toggleSidebar = function() {
+    document.getElementById('governor-panel').classList.toggle('open');
+  };
+
+  // ========== Export / Import ==========
+
+  // Minimal zip builder (store-only, no compression — keeps it dependency-free)
+  function createZip(files) {
+    // files: [{name: string, content: string}]
+    var localFiles = [];
+    var centralDir = [];
+    var offset = 0;
+
+    for (var i = 0; i < files.length; i++) {
+      var name = new TextEncoder().encode(files[i].name);
+      var data = new TextEncoder().encode(files[i].content);
+      var crc = crc32(data);
+
+      // Local file header (30 bytes + name + data)
+      var local = new Uint8Array(30 + name.length + data.length);
+      var v = new DataView(local.buffer);
+      v.setUint32(0, 0x04034b50, true);  // signature
+      v.setUint16(4, 20, true);           // version needed
+      v.setUint16(6, 0, true);            // flags
+      v.setUint16(8, 0, true);            // compression (store)
+      v.setUint16(10, 0, true);           // mod time
+      v.setUint16(12, 0, true);           // mod date
+      v.setUint32(14, crc, true);         // crc32
+      v.setUint32(18, data.length, true); // compressed size
+      v.setUint32(22, data.length, true); // uncompressed size
+      v.setUint16(26, name.length, true); // name length
+      v.setUint16(28, 0, true);           // extra length
+      local.set(name, 30);
+      local.set(data, 30 + name.length);
+      localFiles.push(local);
+
+      // Central directory entry (46 bytes + name)
+      var central = new Uint8Array(46 + name.length);
+      var cv = new DataView(central.buffer);
+      cv.setUint32(0, 0x02014b50, true);   // signature
+      cv.setUint16(4, 20, true);            // version made by
+      cv.setUint16(6, 20, true);            // version needed
+      cv.setUint16(8, 0, true);             // flags
+      cv.setUint16(10, 0, true);            // compression
+      cv.setUint16(12, 0, true);            // mod time
+      cv.setUint16(14, 0, true);            // mod date
+      cv.setUint32(16, crc, true);          // crc32
+      cv.setUint32(20, data.length, true);  // compressed size
+      cv.setUint32(24, data.length, true);  // uncompressed size
+      cv.setUint16(28, name.length, true);  // name length
+      cv.setUint16(30, 0, true);            // extra length
+      cv.setUint16(32, 0, true);            // comment length
+      cv.setUint16(34, 0, true);            // disk number
+      cv.setUint16(36, 0, true);            // internal attrs
+      cv.setUint32(38, 0, true);            // external attrs
+      cv.setUint32(42, offset, true);       // local header offset
+      central.set(name, 46);
+      centralDir.push(central);
+
+      offset += local.length;
+    }
+
+    // End of central directory (22 bytes)
+    var centralSize = centralDir.reduce(function(a, b) { return a + b.length; }, 0);
+    var eocd = new Uint8Array(22);
+    var ev = new DataView(eocd.buffer);
+    ev.setUint32(0, 0x06054b50, true);        // signature
+    ev.setUint16(4, 0, true);                  // disk number
+    ev.setUint16(6, 0, true);                  // central dir disk
+    ev.setUint16(8, files.length, true);       // entries on disk
+    ev.setUint16(10, files.length, true);      // total entries
+    ev.setUint32(12, centralSize, true);       // central dir size
+    ev.setUint32(16, offset, true);            // central dir offset
+    ev.setUint16(20, 0, true);                 // comment length
+
+    // Concatenate all parts
+    var totalSize = offset + centralSize + 22;
+    var result = new Uint8Array(totalSize);
+    var pos = 0;
+    for (var i = 0; i < localFiles.length; i++) {
+      result.set(localFiles[i], pos);
+      pos += localFiles[i].length;
+    }
+    for (var i = 0; i < centralDir.length; i++) {
+      result.set(centralDir[i], pos);
+      pos += centralDir[i].length;
+    }
+    result.set(eocd, pos);
+    return result;
+  }
+
+  function crc32(data) {
+    var table = crc32.table;
+    if (!table) {
+      table = crc32.table = new Uint32Array(256);
+      for (var i = 0; i < 256; i++) {
+        var c = i;
+        for (var j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        table[i] = c;
+      }
+    }
+    var crc = 0xFFFFFFFF;
+    for (var i = 0; i < data.length; i++) crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function downloadBlob(blob, filename) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+  }
+
+  function downloadText(text, filename, mime) {
+    downloadBlob(new Blob([text], { type: mime || 'text/plain' }), filename);
+  }
+
+  function sessionToMarkdown(messages, title) {
+    var lines = ['# ' + (title || 'Chat Transcript'), ''];
+    var now = new Date().toISOString().split('T')[0];
+    lines.push('*Exported ' + now + '*', '');
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      if (m.role === 'user') {
+        lines.push('## You', '', m.content, '');
+      } else if (m.role === 'assistant') {
+        lines.push('## Assistant', '', m.content, '');
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function sessionToJson() {
+    return JSON.stringify({
+      session_id: SM.currentSessionId,
+      context_id: contextId,
+      exported_at: new Date().toISOString(),
+      messages: SM.conversationMessages
+    }, null, 2);
+  }
+
+  function fetchGovernorState() {
+    return fetch(BASE + '/governor/export').then(function(r) { return r.json(); });
+  }
+
+  window.exportAll = function() {
+    var title = 'New conversation';
+    var select = document.getElementById('session-select');
+    if (select.selectedOptions[0]) title = select.selectedOptions[0].textContent;
+
+    fetchGovernorState().then(function(govState) {
+      var files = [
+        { name: 'session.md', content: sessionToMarkdown(SM.conversationMessages, title) },
+        { name: 'session.json', content: sessionToJson() },
+        { name: 'governor_state.json', content: JSON.stringify(govState, null, 2) }
+      ];
+      var zipData = createZip(files);
+      var slug = title.replace(/[^a-zA-Z0-9]+/g, '_').substring(0, 30).replace(/_+$/, '');
+      downloadBlob(new Blob([zipData], { type: 'application/zip' }), (slug || 'export') + '.zip');
+    });
+  };
+
+  window.exportChatMd = function() {
+    var title = 'New conversation';
+    var select = document.getElementById('session-select');
+    if (select.selectedOptions[0]) title = select.selectedOptions[0].textContent;
+    downloadText(sessionToMarkdown(SM.conversationMessages, title), 'session.md', 'text/markdown');
+  };
+
+  window.exportChatJson = function() {
+    downloadText(sessionToJson(), 'session.json', 'application/json');
+  };
+
+  window.importGovernorState = function(input) {
+    if (!input.files || !input.files[0]) return;
+    var file = input.files[0];
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        var state = JSON.parse(e.target.result);
+      } catch (err) {
+        alert('Invalid JSON file.');
+        input.value = '';
+        return;
+      }
+
+      fetch(BASE + '/governor/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state)
+      }).then(function(r) { return r.json(); }).then(function(result) {
+        refreshGovernor();
+        alert(result.message || ('Imported ' + (result.imported || 0) + ' item(s).'));
+        input.value = '';
+      }).catch(function(err) {
+        alert('Import failed: ' + err.message);
+        input.value = '';
+      });
+    };
+    reader.readAsText(file);
+  };
+
+  // ========== Init ==========
+
+  loadModels();
+  loadBackends();
+  refreshGovernor();
+  setInterval(refreshGovernor, GOV_REFRESH);
+
+  // Load backend info and context ID
+  fetch(BASE + '/api/info').then(function(r) { return r.json(); }).then(function(data) {
+    document.getElementById('backend-badge').textContent = data.backend || '';
+    contextId = data.governor_context || 'default';
+    initSession();
+  }).catch(function() {
+    initSession();
+  });
+
+  function initSession() {
+    // 1. Try localStorage restore (instant)
+    var restored = SM.restoreFromLocal();
+    if (restored && SM.conversationMessages.length > 0) {
+      renderConversation();
+    }
+
+    // 2. Fetch session list from server
+    SM.listSessions().then(function(sessions) {
+      SM.refreshSessionList();
+
+      if (restored && SM.currentSessionId) {
+        // Check if our cached session still exists on server
+        var found = false;
+        for (var i = 0; i < sessions.length; i++) {
+          if (sessions[i].id === SM.currentSessionId) { found = true; break; }
+        }
+        if (found) return; // All good, use cached session
+        // Session was deleted on server, fall through
+      }
+
+      if (!restored || !SM.currentSessionId) {
+        if (sessions.length > 0) {
+          // Load most recent session from server
+          SM.loadSession(sessions[0].id).catch(function() {
+            SM.createSession('New conversation');
+          });
+        } else {
+          // No sessions at all, create one
+          SM.createSession('New conversation');
+        }
+      }
+    }).catch(function() {
+      // Server unreachable, use local state or create placeholder
+      if (!restored) {
+        SM.currentSessionId = 'local-' + Date.now();
+        SM.conversationMessages = [];
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>
