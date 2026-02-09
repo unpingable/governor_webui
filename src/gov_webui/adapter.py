@@ -2374,10 +2374,10 @@ async def v2_intent_validate(request: IntentValidateRequest) -> dict[str, Any]:
             continue
 
     if schema is None:
-        return {"errors": [f"Schema ID '{request.schema_id}' not found for mode '{mode}'"]}
+        return {"valid": False, "errors": [f"Schema ID '{request.schema_id}' not found for mode '{mode}'"]}
 
     errors = validate_response(response, schema)
-    return {"errors": errors, "valid": len(errors) == 0}
+    return {"valid": len(errors) == 0, "errors": errors}
 
 
 @app.post("/v2/intent/compile")
