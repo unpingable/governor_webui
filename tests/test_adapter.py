@@ -6,7 +6,6 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from governor.chat_bridge import ChatResponse as BridgeChatResponse
 from governor.context_manager import GovernorContextManager
 
 
@@ -38,10 +37,12 @@ def reset_adapter_globals() -> None:
     adapter_mod._bridge = None
     adapter_mod._context_manager = None
     adapter_mod._session_store = None
+    adapter_mod._daemon_client = None
     yield
     adapter_mod._bridge = None
     adapter_mod._context_manager = None
     adapter_mod._session_store = None
+    adapter_mod._daemon_client = None
 
 
 @pytest.fixture
@@ -162,21 +163,29 @@ class TestModelsEndpoint:
 
 
 class TestChatEndpoint:
-    """Tests for POST /v1/chat/completions."""
+    """Tests for POST /v1/chat/completions (delegates to daemon)."""
 
-    def test_non_streaming_response_format(self, client, monkeypatch) -> None:
+    def _make_mock_daemon(self, content="Hello from test", model="test-model",
+                          usage=None, violations=None, footer=None, pending=None):
+        """Create a mock DaemonChatClient with chat_send returning given data."""
+        mock = AsyncMock()
+        mock.chat_send = AsyncMock(return_value={
+            "content": content,
+            "model": model,
+            "usage": usage or {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+            "violations": violations or [],
+            "footer": footer,
+            "pending": pending,
+        })
+        mock.connect = AsyncMock()
+        mock.close = AsyncMock()
+        return mock
+
+    def test_non_streaming_response_format(self, client) -> None:
         """Non-streaming response has correct OpenAI format."""
         import gov_webui.adapter as adapter_mod
 
-        mock_bridge = AsyncMock()
-        mock_bridge.chat.return_value = BridgeChatResponse(
-            content="Hello from test", model="test-model",
-            usage={"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
-        )
-        mock_bridge.list_models = AsyncMock(return_value=[])
-
-        # Inject mock bridge
-        adapter_mod._bridge = mock_bridge
+        adapter_mod._daemon_client = self._make_mock_daemon()
 
         response = client.post(
             "/v1/chat/completions",
@@ -195,13 +204,13 @@ class TestChatEndpoint:
         assert data["choices"][0]["message"]["role"] == "assistant"
         assert data["usage"]["total_tokens"] == 8
 
-    def test_error_handling(self, client, monkeypatch) -> None:
-        """Backend errors return 502."""
+    def test_error_handling(self, client) -> None:
+        """Daemon errors return 502."""
         import gov_webui.adapter as adapter_mod
 
-        mock_bridge = AsyncMock()
-        mock_bridge.chat.side_effect = Exception("Connection refused")
-        adapter_mod._bridge = mock_bridge
+        mock = AsyncMock()
+        mock.chat_send = AsyncMock(side_effect=Exception("Connection refused"))
+        adapter_mod._daemon_client = mock
 
         response = client.post(
             "/v1/chat/completions",
@@ -213,15 +222,11 @@ class TestChatEndpoint:
         )
         assert response.status_code == 502
 
-    def test_empty_messages(self, client, monkeypatch) -> None:
+    def test_empty_messages(self, client) -> None:
         """Empty messages list is handled."""
         import gov_webui.adapter as adapter_mod
 
-        mock_bridge = AsyncMock()
-        mock_bridge.chat.return_value = BridgeChatResponse(
-            content="OK", model="m"
-        )
-        adapter_mod._bridge = mock_bridge
+        adapter_mod._daemon_client = self._make_mock_daemon(content="OK", model="m")
 
         response = client.post(
             "/v1/chat/completions",
@@ -233,37 +238,13 @@ class TestChatEndpoint:
         )
         assert response.status_code == 200
 
-    def test_max_tokens_passthrough(self, client, monkeypatch) -> None:
-        """max_tokens is passed through to backend."""
-        import gov_webui.adapter as adapter_mod
-
-        mock_bridge = AsyncMock()
-        mock_bridge.chat.return_value = BridgeChatResponse(
-            content="OK", model="m"
-        )
-        adapter_mod._bridge = mock_bridge
-
-        client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "Hi"}],
-                "max_tokens": 100,
-                "stream": False,
-            },
-        )
-        call_kwargs = mock_bridge.chat.call_args[1]
-        assert call_kwargs.get("max_tokens") == 100
-
-    def test_model_passthrough(self, client, monkeypatch) -> None:
+    def test_model_passthrough(self, client) -> None:
         """Model name is passed through correctly."""
         import gov_webui.adapter as adapter_mod
 
-        mock_bridge = AsyncMock()
-        mock_bridge.chat.return_value = BridgeChatResponse(
+        adapter_mod._daemon_client = self._make_mock_daemon(
             content="OK", model="custom-model"
         )
-        adapter_mod._bridge = mock_bridge
 
         response = client.post(
             "/v1/chat/completions",
@@ -275,6 +256,74 @@ class TestChatEndpoint:
         )
         data = response.json()
         assert data["model"] == "custom-model"
+
+    def test_daemon_called_with_messages(self, client) -> None:
+        """Verify daemon receives the correct messages."""
+        import gov_webui.adapter as adapter_mod
+
+        mock = self._make_mock_daemon()
+        adapter_mod._daemon_client = mock
+
+        client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+            },
+        )
+        # Verify chat_send was called (not ChatBridge.chat)
+        mock.chat_send.assert_called_once()
+        call_kwargs = mock.chat_send.call_args[1]
+        assert call_kwargs["messages"] == [{"role": "user", "content": "Hi"}]
+        assert call_kwargs["model"] == "test-model"
+
+    def test_footer_appended_to_content(self, client) -> None:
+        """Governor footer from daemon is appended to response content."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._daemon_client = self._make_mock_daemon(
+            content="Hello", footer="[Governor: OK]"
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+            },
+        )
+        data = response.json()
+        assert "[Governor: OK]" in data["choices"][0]["message"]["content"]
+
+    def test_pending_violation_returns_prompt(self, client) -> None:
+        """When daemon returns pending violation, format as violation prompt."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._daemon_client = self._make_mock_daemon(
+            content="",
+            pending={
+                "id": "p1",
+                "violations": [{"anchor_id": "a1", "severity": "reject"}],
+                "mode": "general",
+                "blocked_response": "bad text",
+            },
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # Should contain violation prompt, not the original content
+        content = data["choices"][0]["message"]["content"]
+        assert content  # Not empty — violation prompt was generated
 
 
 # ============================================================================
@@ -451,20 +500,28 @@ class TestBackendSelection:
 
 
 class TestStreamingResponse:
-    """Tests for streaming chat responses."""
+    """Tests for streaming chat responses (via daemon)."""
 
-    def test_streaming_request(self, client, monkeypatch) -> None:
+    def test_streaming_request(self, client) -> None:
         """Streaming request returns SSE format."""
         import gov_webui.adapter as adapter_mod
 
-        async def mock_stream(*args, **kwargs):
-            from governor.chat_bridge import ChatChunk
-            yield ChatChunk(content="Hello ")
-            yield ChatChunk(content="world", finish_reason="stop")
+        async def mock_daemon_stream(*args, **kwargs):
+            yield ("Hello ", None)
+            yield ("world", None)
+            yield (None, {
+                "content": "Hello world",
+                "model": "test-model",
+                "usage": {},
+                "violations": [],
+                "footer": None,
+                "pending": None,
+            })
 
-        mock_bridge = AsyncMock()
-        mock_bridge.chat.return_value = mock_stream()
-        adapter_mod._bridge = mock_bridge
+        mock = AsyncMock()
+        mock.chat_stream = MagicMock(return_value=mock_daemon_stream())
+        mock.connect = AsyncMock()
+        adapter_mod._daemon_client = mock
 
         response = client.post(
             "/v1/chat/completions",
@@ -803,34 +860,22 @@ class TestGovernorUI:
 
 
 class TestGovernorFooterIntegration:
-    """End-to-end tests for governor footer in chat responses."""
+    """End-to-end tests for governor footer in chat responses (via daemon)."""
 
-    def _setup_fiction_context(self, tmp_contexts_dir: Path) -> GovernorContextManager:
-        """Create a fiction context with a banned trope bible."""
-        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
-        ctx = cm.create("test-context", mode="fiction")
-        bible_dir = ctx.root / ".fiction-gov" / "bible"
-        bible_dir.mkdir(parents=True, exist_ok=True)
-        (bible_dir / "banned_tropes.json").write_text(json.dumps([
-            {"name": "chosen_one", "patterns": ["the chosen one"], "severity": "error", "reason": "cliche"},
-        ]))
-        return cm
-
-    def test_non_streaming_governor_ok_footer(self, client, tmp_contexts_dir) -> None:
-        """Non-streaming response includes [Governor] OK when clean."""
+    def test_non_streaming_governor_ok_footer(self, client) -> None:
+        """Non-streaming response includes [Governor] OK when daemon returns footer."""
         import gov_webui.adapter as adapter_mod
-        from governor.chat_bridge import ChatBridge, ChatResponse as BridgeCR
 
-        cm = self._setup_fiction_context(tmp_contexts_dir)
-
-        mock_backend = AsyncMock()
-        mock_backend.chat = AsyncMock(return_value=BridgeCR(
-            content="Alice walked peacefully.", model="test-model"
-        ))
-
-        bridge = ChatBridge(backend=mock_backend, context_manager=cm, show_ok_footer=True)
-        adapter_mod._bridge = bridge
-        adapter_mod._context_manager = cm
+        mock = AsyncMock()
+        mock.chat_send = AsyncMock(return_value={
+            "content": "Alice walked peacefully.",
+            "model": "test-model",
+            "usage": {},
+            "violations": [],
+            "footer": "[Governor] OK — 0 anchors checked",
+            "pending": None,
+        })
+        adapter_mod._daemon_client = mock
 
         response = client.post(
             "/v1/chat/completions",
@@ -845,23 +890,25 @@ class TestGovernorFooterIntegration:
         content = data["choices"][0]["message"]["content"]
         assert "[Governor] OK" in content
 
-    def test_streaming_governor_footer_in_sse(self, client, tmp_contexts_dir) -> None:
+    def test_streaming_governor_footer_in_sse(self, client) -> None:
         """Streaming response includes governor feedback in SSE chunks."""
         import gov_webui.adapter as adapter_mod
-        from governor.chat_bridge import ChatBridge, ChatChunk as BridgeChunk
 
-        cm = self._setup_fiction_context(tmp_contexts_dir)
+        async def mock_stream(*args, **kwargs):
+            yield ("She was the chosen one.", None)
+            yield (None, {
+                "content": "She was the chosen one.",
+                "model": "test-model",
+                "usage": {},
+                "violations": [],
+                "footer": "[Governor] OK",
+                "pending": None,
+            })
 
-        async def mock_stream_fn(*args, **kwargs):
-            yield BridgeChunk(content="She was the chosen one.")
-            yield BridgeChunk(content="", finish_reason="stop")
-
-        mock_backend = AsyncMock()
-        mock_backend.stream = MagicMock(return_value=mock_stream_fn())
-
-        bridge = ChatBridge(backend=mock_backend, context_manager=cm, show_ok_footer=True)
-        adapter_mod._bridge = bridge
-        adapter_mod._context_manager = cm
+        mock = AsyncMock()
+        mock.chat_stream = MagicMock(return_value=mock_stream())
+        mock.connect = AsyncMock()
+        adapter_mod._daemon_client = mock
 
         response = client.post(
             "/v1/chat/completions",

@@ -44,19 +44,13 @@ from pydantic import BaseModel, Field
 
 from governor.chat_bridge import (
     ChatBridge,
-    ChatChunk,
-    ChatMessage as BridgeChatMessage,
-    ChatResponse as BridgeChatResponse,
-    GovernorHooks,
-    OllamaBackend,
-    ViolationPendingResponse,
     create_backend,
 )
 from governor.violation_resolver import (
-    ResolutionAction,
     ViolationResolver,
     format_violation_prompt,
 )
+from gov_webui.daemon_client import DaemonChatClient, default_socket_path
 from governor.context_manager import GovernorContextManager
 from governor.session_store import ChatSession, SessionMessage, SessionStore
 from governor.viewmodel import build_viewmodel, GovernorViewModel
@@ -212,6 +206,24 @@ class BackendSwitchRequest(BaseModel):
 _bridge: ChatBridge | None = None
 _context_manager: GovernorContextManager | None = None
 _session_store: SessionStore | None = None
+_daemon_client: DaemonChatClient | None = None
+
+
+def _get_daemon_client() -> DaemonChatClient:
+    """Get or create the daemon RPC client for the chat path."""
+    global _daemon_client
+    if _daemon_client is None:
+        socket_path = os.environ.get("GOVERNOR_SOCKET", "")
+        if not socket_path:
+            gov_dir_env = os.environ.get("GOVERNOR_DIR", "")
+            if gov_dir_env:
+                gov_dir = Path(gov_dir_env)
+            else:
+                base = Path(GOVERNOR_CONTEXTS_DIR) if GOVERNOR_CONTEXTS_DIR else Path.home() / ".governor-contexts"
+                gov_dir = base / GOVERNOR_CONTEXT_ID / ".governor"
+            socket_path = str(default_socket_path(gov_dir))
+        _daemon_client = DaemonChatClient(socket_path)
+    return _daemon_client
 
 
 def _get_context_manager() -> GovernorContextManager:
@@ -400,179 +412,188 @@ async def switch_backend(request: BackendSwitchRequest) -> dict[str, Any]:
 async def chat_completions(
     request: ChatCompletionRequest,
 ) -> ChatCompletionResponse | StreamingResponse:
-    """OpenAI-compatible chat completions endpoint with violation resolution."""
-    bridge = _get_bridge()
-    cm = _get_context_manager()
-    ctx = cm.get_or_create(GOVERNOR_CONTEXT_ID, mode=GOVERNOR_MODE)
+    """OpenAI-compatible chat completions endpoint.
 
-    # Check for pending violation FIRST
-    resolver = ViolationResolver(
-        governor_dir=ctx.governor_dir,
-        mode=ctx.mode,
-        context_id=ctx.context_id,
-    )
-    pending = resolver.get_pending()
-
-    if pending:
-        # User has a pending violation — check if this message resolves it
-        last_message = request.messages[-1].content if request.messages else ""
-        action = resolver.is_resolution_command(last_message)
-
-        if action:
-            # Handle resolution
-            result = await _handle_resolution(resolver, pending, action, bridge, request.model)
-            return _format_resolution_response(result, request.model)
-        else:
-            # Re-present the choices — don't proceed with normal chat
-            return _format_violation_pending_response(pending, request.model)
-
-    # Convert Pydantic models to bridge messages
-    bridge_messages = [
-        BridgeChatMessage(role=m.role, content=m.content) for m in request.messages
-    ]
-
-    kwargs: dict[str, Any] = {
-        "temperature": request.temperature,
-        "top_p": request.top_p,
-    }
-    if request.max_tokens is not None:
-        kwargs["max_tokens"] = request.max_tokens
-
-    context_id = GOVERNOR_CONTEXT_ID
+    Delegates to the governor daemon for the full governed pipeline:
+    pending check → augment → generate → check → receipt.
+    """
+    client = _get_daemon_client()
+    messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     if request.stream:
         return StreamingResponse(
-            _stream_response(bridge, bridge_messages, request.model, context_id, kwargs),
+            _stream_via_daemon(client, messages, request.model, GOVERNOR_CONTEXT_ID),
             media_type="text/event-stream",
         )
-    else:
-        return await _non_streaming_response_with_blocking(
-            bridge, bridge_messages, request.model, context_id, kwargs, ctx, resolver
-        )
 
-
-async def _non_streaming_response(
-    bridge: ChatBridge,
-    messages: list[BridgeChatMessage],
-    model: str,
-    context_id: str,
-    kwargs: dict[str, Any],
-) -> ChatCompletionResponse:
-    """Handle non-streaming chat response (legacy, no blocking check)."""
     try:
-        result = await bridge.chat(
+        result = await client.chat_send(
             messages=messages,
-            model=model,
-            context_id=context_id,
-            stream=False,
-            **kwargs,
-        )
-        # result is ChatResponse (not streaming)
-        assert isinstance(result, BridgeChatResponse)
-
-        return ChatCompletionResponse(
-            id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
-            created=int(time.time()),
-            model=result.model,
-            choices=[
-                ChatCompletionChoice(
-                    index=0,
-                    message=ChatMessage(role="assistant", content=result.content),
-                    finish_reason=result.finish_reason,
-                )
-            ],
-            usage=Usage(
-                prompt_tokens=result.usage.get("prompt_tokens", 0),
-                completion_tokens=result.usage.get("completion_tokens", 0),
-                total_tokens=result.usage.get("total_tokens", 0),
-            ),
+            model=request.model,
+            context_id=GOVERNOR_CONTEXT_ID,
         )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Backend error: {e}")
+        raise HTTPException(status_code=502, detail=f"Daemon error: {e}")
+
+    # If daemon returned a pending violation, format as violation prompt
+    if result.get("pending"):
+        return _format_violation_pending_response(result, request.model)
+
+    # Build content with optional governor footer
+    content = result.get("content", "")
+    footer = result.get("footer")
+    if footer:
+        content = f"{content}\n\n{footer}"
+
+    usage_data = result.get("usage") or {}
+    return ChatCompletionResponse(
+        id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
+        created=int(time.time()),
+        model=result.get("model", request.model),
+        choices=[
+            ChatCompletionChoice(
+                index=0,
+                message=ChatMessage(role="assistant", content=content),
+                finish_reason="stop",
+            )
+        ],
+        usage=Usage(
+            prompt_tokens=usage_data.get("prompt_tokens", 0),
+            completion_tokens=usage_data.get("completion_tokens", 0),
+            total_tokens=usage_data.get("total_tokens", 0),
+        ),
+    )
 
 
-async def _non_streaming_response_with_blocking(
-    bridge: ChatBridge,
-    messages: list[BridgeChatMessage],
+async def _stream_via_daemon(
+    client: DaemonChatClient,
+    messages: list[dict[str, str]],
     model: str,
     context_id: str,
-    kwargs: dict[str, Any],
-    ctx: Any,
-    resolver: ViolationResolver,
-) -> ChatCompletionResponse:
-    """Handle non-streaming chat response with blocking violation check."""
+) -> AsyncGenerator[str, None]:
+    """Stream response via daemon in OpenAI SSE format."""
+    request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+    final_result: dict | None = None
+
     try:
-        result = await bridge.chat(
-            messages=messages,
-            model=model,
-            context_id=context_id,
-            stream=False,
-            **kwargs,
-        )
-        assert isinstance(result, BridgeChatResponse)
+        async for delta, final in client.chat_stream(
+            messages=messages, model=model, context_id=context_id
+        ):
+            if delta:
+                sse_chunk = {
+                    "id": request_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": delta},
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                yield f"data: {json.dumps(sse_chunk)}\n\n"
+            if final is not None:
+                final_result = final
 
-        # Check for blocking violations
-        run_id = uuid.uuid4().hex[:12]
-        hooks = GovernorHooks(ctx)
-        check_result = hooks.check_response_blocking(result.content, run_id)
+        # If daemon returned a pending violation, emit it as a final chunk
+        if final_result and final_result.get("pending"):
+            pending = final_result["pending"]
+            violations = pending.get("violations", [])
+            mode = pending.get("mode", "general")
+            prompt = format_violation_prompt(violations, mode)
+            sse_chunk = {
+                "id": request_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": f"\n\n{prompt}"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            yield f"data: {json.dumps(sse_chunk)}\n\n"
 
-        if isinstance(check_result, ViolationPendingResponse):
-            # Return violation prompt instead of normal response
-            return _format_violation_pending_response(check_result, model)
+        # If daemon returned a footer, emit it
+        if final_result and final_result.get("footer"):
+            sse_chunk = {
+                "id": request_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": f"\n\n{final_result['footer']}"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            yield f"data: {json.dumps(sse_chunk)}\n\n"
 
-        # Normal response (may have non-blocking violations in footer)
-        return ChatCompletionResponse(
-            id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
-            created=int(time.time()),
-            model=result.model,
-            choices=[
-                ChatCompletionChoice(
-                    index=0,
-                    message=ChatMessage(role="assistant", content=result.content),
-                    finish_reason=result.finish_reason,
-                )
+        # Final done chunk
+        done_chunk = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop",
+                }
             ],
-            usage=Usage(
-                prompt_tokens=result.usage.get("prompt_tokens", 0),
-                completion_tokens=result.usage.get("completion_tokens", 0),
-                total_tokens=result.usage.get("total_tokens", 0),
-            ),
-        )
+        }
+        yield f"data: {json.dumps(done_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
+
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Backend error: {e}")
-
-
-async def _handle_resolution(
-    resolver: ViolationResolver,
-    pending: Any,
-    action: ResolutionAction,
-    bridge: ChatBridge,
-    model: str,
-) -> Any:
-    """Handle a resolution action for a pending violation."""
-    if action == ResolutionAction.FIX:
-        return await resolver.resolve_fix(pending, bridge.backend, model)
-    elif action == ResolutionAction.REVISE:
-        return resolver.resolve_revise(pending)
-    else:  # PROCEED
-        return resolver.resolve_proceed(pending)
+        error_chunk = {"error": {"message": str(e), "type": "server_error"}}
+        yield f"data: {json.dumps(error_chunk)}\n\n"
 
 
 def _format_violation_pending_response(
     pending: Any,
     model: str,
 ) -> ChatCompletionResponse:
-    """Format a ViolationPendingResponse as a ChatCompletionResponse.
+    """Format a pending violation as a ChatCompletionResponse.
 
-    The response content is the violation prompt asking user to choose an action.
+    Accepts either a daemon result dict (with 'pending' key) or a
+    PendingViolation object. The response content is the violation prompt
+    asking user to choose an action.
     """
-    # Handle both ViolationPendingResponse and PendingViolation
-    if hasattr(pending, "prompt"):
+    if isinstance(pending, dict):
+        # Daemon result dict — extract violations/mode from the pending sub-dict
+        p = pending.get("pending", pending)
+        violations = p.get("violations", [])
+        mode = p.get("mode", "general")
+    elif hasattr(pending, "prompt"):
         # ViolationPendingResponse from check_response_blocking
         prompt_text = pending.prompt
+        return ChatCompletionResponse(
+            id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
+            created=int(time.time()),
+            model=model,
+            choices=[
+                ChatCompletionChoice(
+                    index=0,
+                    message=ChatMessage(role="assistant", content=prompt_text),
+                    finish_reason="stop",
+                )
+            ],
+            usage=Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+        )
     else:
-        # PendingViolation from get_pending
-        prompt_text = format_violation_prompt(pending.violations, pending.mode)
+        # PendingViolation object from get_pending
+        violations = pending.violations
+        mode = pending.mode
+
+    prompt_text = format_violation_prompt(violations, mode)
 
     return ChatCompletionResponse(
         id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
@@ -587,85 +608,6 @@ def _format_violation_pending_response(
         ],
         usage=Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
     )
-
-
-def _format_resolution_response(
-    result: Any,
-    model: str,
-) -> ChatCompletionResponse:
-    """Format a ResolutionResult as a ChatCompletionResponse."""
-    # Build response content based on resolution action
-    if result.success:
-        if result.action == ResolutionAction.FIX:
-            # Return the corrected content
-            content = result.new_content or result.message
-        elif result.action == ResolutionAction.REVISE:
-            # Return original (now permitted) + note about revision
-            content = f"[Governor] {result.message}\n\n{result.new_content or ''}"
-        else:  # PROCEED
-            # Return original (now permitted) + exception note
-            content = f"[Governor] {result.message}\n\n{result.new_content or ''}"
-    else:
-        content = f"[Governor] Resolution failed: {result.message}"
-
-    return ChatCompletionResponse(
-        id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
-        created=int(time.time()),
-        model=model,
-        choices=[
-            ChatCompletionChoice(
-                index=0,
-                message=ChatMessage(role="assistant", content=content),
-                finish_reason="stop",
-            )
-        ],
-        usage=Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
-    )
-
-
-async def _stream_response(
-    bridge: ChatBridge,
-    messages: list[BridgeChatMessage],
-    model: str,
-    context_id: str,
-    kwargs: dict[str, Any],
-) -> AsyncGenerator[str, None]:
-    """Stream response in OpenAI SSE format."""
-    request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-
-    try:
-        stream = await bridge.chat(
-            messages=messages,
-            model=model,
-            context_id=context_id,
-            stream=True,
-            **kwargs,
-        )
-
-        async for chunk in stream:
-            assert isinstance(chunk, ChatChunk)
-            sse_chunk = {
-                "id": request_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {"content": chunk.content} if chunk.content else {},
-                        "finish_reason": chunk.finish_reason,
-                    }
-                ],
-            }
-            yield f"data: {json.dumps(sse_chunk)}\n\n"
-
-            if chunk.finish_reason:
-                yield "data: [DONE]\n\n"
-                break
-
-    except Exception as e:
-        error_chunk = {"error": {"message": str(e), "type": "server_error"}}
-        yield f"data: {json.dumps(error_chunk)}\n\n"
 
 
 # ============================================================================
