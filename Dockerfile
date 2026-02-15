@@ -5,6 +5,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install agent-governor from local source (not on PyPI)
+COPY agent-governor/ /tmp/agent-governor/
+RUN pip install --no-cache-dir /tmp/agent-governor/ && rm -rf /tmp/agent-governor/
+
 # Install dependencies (README.md required by pyproject.toml)
 COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir .
@@ -15,6 +19,10 @@ COPY src/ src/
 # Install the package
 RUN pip install -e .
 
+# Entrypoint script: start governor daemon, then uvicorn
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Expose port
 EXPOSE 8000
 
@@ -22,5 +30,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the adapter
-CMD ["uvicorn", "gov_webui.adapter:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run daemon + adapter
+CMD ["/app/entrypoint.sh"]

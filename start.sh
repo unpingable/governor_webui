@@ -45,6 +45,21 @@ if [ ! -f "$CREDS" ]; then
   exit 1
 fi
 
+# ── Sync agent-governor source for Docker build ──────────────────────────
+# agent-governor is not on PyPI — copy source into build context.
+AGENT_GOV_DIR="$(cd "$(dirname "$0")/../agent_gov" && pwd)"
+if [ ! -d "$AGENT_GOV_DIR/src/governor" ]; then
+  echo "Error: agent-governor source not found at $AGENT_GOV_DIR"
+  echo "Expected: ../agent_gov relative to this repo"
+  exit 1
+fi
+rm -rf agent-governor
+mkdir -p agent-governor/src
+cp "$AGENT_GOV_DIR/pyproject.toml" agent-governor/
+cp "$AGENT_GOV_DIR/README.md" agent-governor/
+cp -r "$AGENT_GOV_DIR/src/governor" agent-governor/src/
+echo "Synced agent-governor from $AGENT_GOV_DIR"
+
 # ── Write .env for docker-compose ──────────────────────────────────────────
 cat > .env <<EOF
 REAL_HOME=$REAL_HOME

@@ -50,7 +50,7 @@ from governor.violation_resolver import (
     ViolationResolver,
     format_violation_prompt,
 )
-from gov_webui.daemon_client import DaemonChatClient, default_socket_path
+from gov_webui.daemon_client import DaemonAuthError, DaemonChatClient, default_socket_path
 from governor.context_manager import GovernorContextManager
 from governor.session_store import ChatSession, SessionMessage, SessionStore
 from governor.viewmodel import build_viewmodel, GovernorViewModel
@@ -432,6 +432,14 @@ async def chat_completions(
             model=request.model,
             context_id=GOVERNOR_CONTEXT_ID,
         )
+    except DaemonAuthError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "Claude Code is not logged in. "
+                "Run `claude /login` in a terminal to re-authenticate."
+            ),
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Daemon error: {e}")
 
@@ -552,6 +560,17 @@ async def _stream_via_daemon(
         yield f"data: {json.dumps(done_chunk)}\n\n"
         yield "data: [DONE]\n\n"
 
+    except DaemonAuthError:
+        error_chunk = {
+            "error": {
+                "message": (
+                    "Claude Code is not logged in. "
+                    "Run `claude /login` in a terminal to re-authenticate."
+                ),
+                "type": "auth_error",
+            }
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
     except Exception as e:
         error_chunk = {"error": {"message": str(e), "type": "server_error"}}
         yield f"data: {json.dumps(error_chunk)}\n\n"

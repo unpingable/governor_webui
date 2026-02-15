@@ -186,3 +186,87 @@ class TestChatDelegatesToDaemon:
         mock_bridge.chat.assert_not_called()
         # Daemon should have been called
         mock_daemon.chat_send.assert_called_once()
+
+
+class TestAuthErrorHandling:
+    """Auth errors from daemon return 401, not 502."""
+
+    def test_non_streaming_auth_error_returns_401(self, client, adapter_mod):
+        """DaemonAuthError on chat.send produces HTTP 401."""
+        from gov_webui.daemon_client import DaemonAuthError
+
+        mock = AsyncMock()
+        mock.chat_send = AsyncMock(
+            side_effect=DaemonAuthError("Claude Code is not logged in")
+        )
+        adapter_mod._daemon_client = mock
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 401
+        assert "claude /login" in response.json()["detail"].lower()
+
+    def test_non_streaming_generic_error_returns_502(self, client, adapter_mod):
+        """Non-auth errors still produce HTTP 502."""
+        mock = AsyncMock()
+        mock.chat_send = AsyncMock(
+            side_effect=RuntimeError("connection refused")
+        )
+        adapter_mod._daemon_client = mock
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 502
+
+    def test_streaming_auth_error_yields_auth_error_type(self, client, adapter_mod):
+        """DaemonAuthError on chat.stream emits an auth_error SSE event."""
+        from gov_webui.daemon_client import DaemonAuthError
+
+        async def mock_stream(*args, **kwargs):
+            raise DaemonAuthError("not logged in")
+            yield  # pragma: no cover — makes this an async generator
+
+        mock = AsyncMock()
+        mock.chat_stream = MagicMock(return_value=mock_stream())
+        mock.connect = AsyncMock()
+        adapter_mod._daemon_client = mock
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": True,
+            },
+        )
+        assert response.status_code == 200  # SSE always starts 200
+        body = response.text
+        assert "auth_error" in body
+        assert "claude /login" in body.lower()
+
+
+class TestDaemonClientAuthDetection:
+    """Unit tests for DaemonAuthError detection in daemon_client._call()."""
+
+    def test_auth_error_code_raises_daemon_auth_error(self):
+        from gov_webui.daemon_client import AUTH_ERROR_CODE, DaemonAuthError
+
+        assert AUTH_ERROR_CODE == -32001
+
+    def test_daemon_auth_error_is_runtime_error(self):
+        from gov_webui.daemon_client import DaemonAuthError
+
+        err = DaemonAuthError("test")
+        assert isinstance(err, RuntimeError)

@@ -16,6 +16,16 @@ from typing import Any, AsyncIterator
 
 logger = logging.getLogger(__name__)
 
+AUTH_ERROR_CODE = -32001
+
+
+class DaemonAuthError(RuntimeError):
+    """Raised when the daemon reports a backend authentication failure.
+
+    This typically means the Claude Code CLI is logged out and the user
+    needs to run `claude /login` to re-authenticate.
+    """
+
 
 # =============================================================================
 # Content-Length framing (same protocol as daemon / Maude rpc.py)
@@ -142,9 +152,11 @@ class DaemonChatClient:
 
             if "error" in resp:
                 err = resp["error"]
-                raise RuntimeError(
-                    f"RPC error {err.get('code', '?')}: {err.get('message', '?')}"
-                )
+                code = err.get("code", 0)
+                message = err.get("message", "unknown error")
+                if code == AUTH_ERROR_CODE:
+                    raise DaemonAuthError(message)
+                raise RuntimeError(f"RPC error {code}: {message}")
             return resp.get("result")
 
     # ========================================================================
@@ -208,9 +220,11 @@ class DaemonChatClient:
             if resp.get("id") == request_id:
                 if "error" in resp:
                     err = resp["error"]
-                    raise RuntimeError(
-                        f"RPC error {err.get('code', '?')}: {err.get('message', '?')}"
-                    )
+                    code = err.get("code", 0)
+                    message = err.get("message", "unknown error")
+                    if code == AUTH_ERROR_CODE:
+                        raise DaemonAuthError(message)
+                    raise RuntimeError(f"RPC error {code}: {message}")
                 yield (None, resp.get("result"))
                 return
 

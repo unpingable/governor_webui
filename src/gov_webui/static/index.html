@@ -903,7 +903,12 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     }).then(function(response) {
-      if (!response.ok) throw new Error('HTTP ' + response.status);
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Claude Code is not logged in. Run `claude /login` in a terminal to re-authenticate.');
+        }
+        throw new Error('HTTP ' + response.status);
+      }
       var reader = response.body.getReader();
       var decoder = new TextDecoder();
       var buffer = '';

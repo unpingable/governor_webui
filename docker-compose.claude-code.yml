@@ -21,8 +21,9 @@ services:
     volumes:
       # Mount claude binary (resolve REAL_HOME for snap Docker compatibility)
       - ${REAL_HOME:-${HOME}}/.local/share/claude/versions/${CLAUDE_VERSION:-2.1.31}:/opt/claude/claude:ro
-      # Mount credentials file (read-only) for authentication
-      - ${REAL_HOME:-${HOME}}/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+      # Mount credentials directory (not file) so atomic renames from
+      # `claude /login` are visible without container restart.
+      - ${REAL_HOME:-${HOME}}/.claude:/root/.claude
 
   code-adapter:
     environment:
@@ -30,7 +31,7 @@ services:
       - CLAUDE_PATH=/opt/claude/claude
     volumes:
       - ${REAL_HOME:-${HOME}}/.local/share/claude/versions/${CLAUDE_VERSION:-2.1.31}:/opt/claude/claude:ro
-      - ${REAL_HOME:-${HOME}}/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+      - ${REAL_HOME:-${HOME}}/.claude:/root/.claude
 
   research-adapter:
     environment:
@@ -38,4 +39,4 @@ services:
       - CLAUDE_PATH=/opt/claude/claude
     volumes:
       - ${REAL_HOME:-${HOME}}/.local/share/claude/versions/${CLAUDE_VERSION:-2.1.31}:/opt/claude/claude:ro
-      - ${REAL_HOME:-${HOME}}/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+      - ${REAL_HOME:-${HOME}}/.claude:/root/.claude
