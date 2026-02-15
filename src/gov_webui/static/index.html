@@ -234,6 +234,18 @@
       </div>
     </div>
 
+    <!-- Governor Footer Visibility -->
+    <div class="card">
+      <div class="card-header"><h3>Footer</h3></div>
+      <div class="card-body" style="display:flex;align-items:center;gap:0.5rem;">
+        <select class="model-select" id="footer-mode" onchange="setFooterMode(this.value)" style="flex:1;">
+          <option value="violations">Violations only</option>
+          <option value="always">Always show</option>
+          <option value="hidden">Hidden</option>
+        </select>
+      </div>
+    </div>
+
     <!-- Export/Import Toolbar -->
     <div class="gov-toolbar">
       <button class="gov-btn primary" onclick="exportAll()">Export All</button>
@@ -752,14 +764,16 @@
             SM.conversationMessages = data.messages;
             renderConversation();
             localStorage.setItem('governor_last_session_' + contextId, sessionId);
+            console.log('[Sessions] loaded from cache:', sessionId, data.messages.length, 'msgs');
             return Promise.resolve();
           }
         }
       } catch (e) {}
 
       // Fallback to server
+      console.log('[Sessions] loading from server:', sessionId);
       return fetch(BASE + '/sessions/' + sessionId).then(function(r) {
-        if (!r.ok) throw new Error('Session not found');
+        if (!r.ok) throw new Error('Session not found: HTTP ' + r.status);
         return r.json();
       }).then(function(data) {
         SM.currentSessionId = data.id;
@@ -768,6 +782,7 @@
         });
         SM.cacheToLocal();
         renderConversation();
+        console.log('[Sessions] loaded from server:', data.id, SM.conversationMessages.length, 'msgs');
       });
     },
 
@@ -775,7 +790,7 @@
       return fetch(BASE + '/sessions/').then(function(r) { return r.json(); }).then(function(data) {
         SM.sessions = data.sessions || [];
         return SM.sessions;
-      }).catch(function() { return []; });
+      }).catch(function(e) { console.error('[Sessions] list failed:', e); return []; });
     },
 
     deleteSession: function(sessionId) {
@@ -808,6 +823,34 @@
     }
   };
 
+  // ========== Governor Footer ==========
+
+  var footerMode = localStorage.getItem('governor_footer_mode') || 'violations';
+
+  window.setFooterMode = function(mode) {
+    footerMode = mode;
+    localStorage.setItem('governor_footer_mode', mode);
+    renderConversation();
+  };
+
+  // Restore saved preference into dropdown
+  (function() {
+    var sel = document.getElementById('footer-mode');
+    if (sel) sel.value = footerMode;
+  })();
+
+  function filterFooter(content) {
+    if (footerMode === 'always') return content;
+    // Match governor footer: \n\n---\n[Governor] ...
+    var footerRe = /\n\n---\n\[Governor\] (.+)$/;
+    var match = content.match(footerRe);
+    if (!match) return content;
+    if (footerMode === 'hidden') return content.replace(footerRe, '');
+    // 'violations' mode: strip OK, keep everything else
+    if (match[1] === 'OK') return content.replace(footerRe, '');
+    return content;
+  }
+
   // ========== Chat ==========
 
   function clearMessages() {
@@ -828,7 +871,7 @@
     if (role === 'user') {
       bubble.textContent = content;
     } else {
-      bubble.innerHTML = renderMarkdown(content);
+      bubble.innerHTML = renderMarkdown(filterFooter(content));
     }
 
     msgDiv.appendChild(bubble);
@@ -1933,39 +1976,46 @@
   });
 
   function initSession() {
-    // 1. Try localStorage restore (instant)
+    // 1. Try localStorage restore for instant render while server loads
     var restored = SM.restoreFromLocal();
-    if (restored && SM.conversationMessages.length > 0) {
+    var cachedId = SM.currentSessionId;
+    var isLocalOnly = cachedId && cachedId.indexOf('local-') === 0;
+    console.log('[Sessions] init: restored=' + restored + ', sessionId=' + cachedId + ', local=' + isLocalOnly);
+    if (restored && SM.conversationMessages.length > 0 && !isLocalOnly) {
       renderConversation();
     }
 
-    // 2. Fetch session list from server
+    // 2. Always reconcile with server — server is source of truth
     SM.listSessions().then(function(sessions) {
+      console.log('[Sessions] server has', sessions.length, 'session(s)');
       SM.refreshSessionList();
 
-      if (restored && SM.currentSessionId) {
-        // Check if our cached session still exists on server
+      // If cached session is a real server session, keep it
+      if (restored && cachedId && !isLocalOnly) {
         var found = false;
         for (var i = 0; i < sessions.length; i++) {
-          if (sessions[i].id === SM.currentSessionId) { found = true; break; }
+          if (sessions[i].id === cachedId) { found = true; break; }
         }
-        if (found) return; // All good, use cached session
-        // Session was deleted on server, fall through
+        if (found) {
+          console.log('[Sessions] using cached session:', cachedId);
+          return;
+        }
+        console.log('[Sessions] cached session gone from server, reloading');
       }
 
-      if (!restored || !SM.currentSessionId) {
-        if (sessions.length > 0) {
-          // Load most recent session from server
-          SM.loadSession(sessions[0].id).catch(function() {
-            SM.createSession('New conversation');
-          });
-        } else {
-          // No sessions at all, create one
+      // Load most recent server session (or create new if none exist)
+      if (sessions.length > 0) {
+        console.log('[Sessions] loading most recent:', sessions[0].id);
+        SM.loadSession(sessions[0].id).catch(function(e) {
+          console.error('[Sessions] load failed, creating new:', e);
           SM.createSession('New conversation');
-        }
+        });
+      } else {
+        console.log('[Sessions] no sessions, creating new');
+        SM.createSession('New conversation');
       }
-    }).catch(function() {
-      // Server unreachable, use local state or create placeholder
+    }).catch(function(e) {
+      console.error('[Sessions] list failed, using local state:', e);
       if (!restored) {
         SM.currentSessionId = 'local-' + Date.now();
         SM.conversationMessages = [];
