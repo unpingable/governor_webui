@@ -1617,7 +1617,10 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 async def governor_ui() -> HTMLResponse:
     """Serve the single-page Governor UI."""
     html_path = _STATIC_DIR / "governor.html"
-    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        content=html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 # ============================================================================
@@ -1658,7 +1661,10 @@ async def health() -> dict[str, Any]:
 async def root() -> HTMLResponse:
     """Serve the combined chat + governor UI."""
     html_path = _STATIC_DIR / "index.html"
-    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        content=html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 # ============================================================================
@@ -2444,7 +2450,10 @@ async def dashboard_ui() -> HTMLResponse:
     html_path = _STATIC_DIR / "dashboard.html"
     if not html_path.exists():
         raise HTTPException(status_code=404, detail="Dashboard HTML not found")
-    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        content=html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 # ============================================================================
