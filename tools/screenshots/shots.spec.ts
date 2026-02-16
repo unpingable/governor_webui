@@ -52,27 +52,10 @@ test.describe('README screenshots', () => {
     });
   });
 
-  test('03 — why overlay expanded', async ({ page }) => {
-    await page.goto('/');
-    await disableAnimations(page);
+  // Shot 03 (Why overlay) deferred — overlay only renders during live generation,
+  // not for seeded messages on page load. Needs frontend fix to render on history load.
 
-    // Wait for seeded chat to render (assistant message with DOI refs)
-    await page.waitForTimeout(2000);
-
-    // Click the Why toggle if present on an assistant message
-    const whyToggle = page.getByTestId('why-toggle').first();
-    if (await whyToggle.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await whyToggle.click();
-      await expect(page.getByTestId('why-body').first()).toBeVisible();
-    }
-
-    await page.screenshot({
-      path: 'docs/img/03_why_overlay.png',
-      fullPage: false,
-    });
-  });
-
-  test('04 — violation modal (requires demo backend or seeded violation)', async ({ page }) => {
+  test('03 — violation modal (requires demo backend or seeded violation)', async ({ page }) => {
     // This shot requires either:
     // (a) a pending violation seeded into .governor/pending_violations.json, or
     // (b) a demo backend that triggers a violation on a known input.
@@ -83,13 +66,13 @@ test.describe('README screenshots', () => {
     const modal = page.getByTestId('violation-modal');
     if (await modal.isVisible({ timeout: 2000 }).catch(() => false)) {
       await page.screenshot({
-        path: 'docs/img/04_violation_modal.png',
+        path: 'docs/img/03_violation_modal.png',
         fullPage: false,
       });
     }
   });
 
-  test('05 — dashboard overview (dark mode)', async ({ page }) => {
+  test('04 — dashboard overview (dark mode)', async ({ page }) => {
     // Dashboard in dark mode for visual variety
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.goto('/dashboard');
@@ -97,7 +80,7 @@ test.describe('README screenshots', () => {
     await page.waitForTimeout(1500);
 
     await page.screenshot({
-      path: 'docs/img/05_dashboard.png',
+      path: 'docs/img/04_dashboard.png',
       fullPage: false,
     });
   });
