@@ -19,14 +19,17 @@ Every mode runs the same two loops. The sidebar changes; the enforcement doesn't
 The assistant says something. The capture classifier fires. Detections appear as **chips** on the message bubble and collect in a **pending drawer**. Nothing auto-promotes. Accept writes to the canonical store with a receipt. Reject logs the decision and discards.
 
 ```
-Assistant says:  "The scaling exponent is 0.76 (doi:10.1234/kaplan2020)."
-Governor sees:   claim + DOI source reference
-UI shows:        chip on message → pending drawer → "Accept claim?"
-User clicks:     ACCEPT
-Governor writes: claim entry + source_ref binding + receipt
-Next turn:       system prompt includes accepted sources + claims
-Why overlay:     "1 source injected, 1 matched, 0 floating"
+1. Assistant outputs:  "...scaling exponent is 0.76 (doi:10.1234/kaplan2020)."
+   → chip appears on message: "citation: doi:10.1234/kaplan2020"
+
+2. User clicks ACCEPT
+   → ledger now has source_ref + claim + receipt
+
+3. Next turn: assistant cites the accepted source
+   → Why overlay: "1 source injected, 1 matched, 0 floating"
 ```
+
+Citations are typed (`doi:/arxiv:/rfc:/cve:/pypi:`) and audited per-turn.
 
 ### 2. Violations: block > resolve > continue
 

@@ -1670,7 +1670,7 @@
       if (data.matched.length > 0) {
         html += '<div class="why-section"><div class="why-section-title">Matched (accepted)</div>';
         data.matched.forEach(function(r) {
-          html += '<div class="why-ref matched">' + esc(r.ref_type + ':' + r.identifier) + '</div>';
+          html += '<div class="why-ref matched">&#10003; ' + esc(r.ref_type + ':' + r.identifier) + '</div>';
         });
         html += '</div>';
       }
@@ -1678,7 +1678,7 @@
       if (data.floating.length > 0) {
         html += '<div class="why-section"><div class="why-section-title">Floating (not accepted)</div>';
         data.floating.forEach(function(r) {
-          html += '<div class="why-ref floating">' + esc(r.ref_type + ':' + r.identifier) + '</div>';
+          html += '<div class="why-ref floating">&#9888; ' + esc(r.ref_type + ':' + r.identifier) + '</div>';
         });
         html += '</div>';
       }
@@ -1686,7 +1686,7 @@
       if (data.referenced.candidates.length > 0) {
         html += '<div class="why-section"><div class="why-section-title">Candidates proposed</div>';
         data.referenced.candidates.forEach(function(c) {
-          html += '<div class="why-ref candidate">' + esc(c) + '</div>';
+          html += '<div class="why-ref candidate">&#43; ' + esc(c) + '</div>';
         });
         html += '</div>';
       }
