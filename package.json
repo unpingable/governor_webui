@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.41.0"
+  },
+  "scripts": {
+    "shots:seed": "bash tools/screenshots/seed.sh",
+    "shots:run": "npx playwright test --config=tools/screenshots/playwright.config.ts",
+    "screenshots": "npm run shots:seed && npm run shots:run"
+  }
+}

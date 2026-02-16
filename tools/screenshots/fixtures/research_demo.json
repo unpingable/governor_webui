@@ -1,0 +1,69 @@
+{
+  "research": {
+    "claims": [
+      {
+        "id": "C-DEMO01",
+        "content": "Neural scaling laws follow a power-law relationship between compute and performance",
+        "status": "supported",
+        "scope": "deep learning",
+        "source_ref": "doi:10.48550/arXiv.2001.08361",
+        "created_at": "2026-01-15T10:00:00Z"
+      },
+      {
+        "id": "C-DEMO02",
+        "content": "Chinchilla-optimal training requires roughly equal scaling of data and parameters",
+        "status": "floating",
+        "scope": "language models",
+        "source_ref": "doi:10.48550/arXiv.2203.15556",
+        "created_at": "2026-01-15T10:05:00Z"
+      },
+      {
+        "id": "C-DEMO03",
+        "content": "Mixture-of-experts models achieve better compute efficiency than dense transformers",
+        "status": "contested",
+        "scope": "architecture",
+        "source_ref": "",
+        "created_at": "2026-01-15T10:10:00Z"
+      }
+    ],
+    "assumptions": [
+      {
+        "id": "A-DEMO01",
+        "content": "Scaling laws hold across model families (not just GPT-style decoders)",
+        "status": "proposed",
+        "dependent_claims": ["C-DEMO01"],
+        "created_at": "2026-01-15T10:15:00Z"
+      }
+    ],
+    "uncertainties": [
+      {
+        "id": "U-DEMO01",
+        "content": "Whether scaling laws plateau at frontier scale or continue indefinitely",
+        "status": "open",
+        "attached_to": "C-DEMO01",
+        "created_at": "2026-01-15T10:20:00Z"
+      }
+    ],
+    "links": [
+      {
+        "id": "L-DEMO01",
+        "link_type": "supports",
+        "from_id": "C-DEMO02",
+        "to_id": "C-DEMO01",
+        "subtype": "",
+        "created_at": "2026-01-15T10:25:00Z"
+      }
+    ],
+    "collapse_events": []
+  },
+  "anchors": [
+    {
+      "id": "no-eval-anchor",
+      "anchor_type": "constraint",
+      "description": "Do not suggest eval() or exec() in code examples",
+      "required_patterns": [],
+      "forbidden_patterns": ["eval(", "exec("],
+      "severity": "reject"
+    }
+  ]
+}
