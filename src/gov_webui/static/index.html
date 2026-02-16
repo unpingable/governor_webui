@@ -157,6 +157,26 @@
   .capture-item-actions .accept-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
   .capture-item-actions .accept-btn:hover { opacity: 0.9; }
 
+  /* Why overlay (per-turn research context panel) */
+  .why-panel { margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; font-size: 0.75rem; color: var(--muted); }
+  .why-toggle { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0.5rem; font-size: 0.7rem; background: var(--accent-light); color: var(--accent); border: 1px solid var(--accent); border-radius: 10px; cursor: pointer; font-weight: 500; margin-top: 0.4rem; border: none; }
+  .why-toggle:hover { opacity: 0.85; }
+  .why-body { display: none; margin-top: 0.4rem; }
+  .why-body.open { display: block; }
+  .why-section { margin-bottom: 0.4rem; }
+  .why-section-title { font-weight: 600; color: var(--fg); font-size: 0.75rem; margin-bottom: 0.15rem; }
+  .why-ref { padding: 0.1rem 0; }
+  .why-ref.matched { color: var(--accent); }
+  .why-ref.floating { color: var(--badge-warn); }
+  .why-ref.candidate { color: var(--muted); font-style: italic; }
+  .why-counts { display: flex; gap: 0.75rem; margin-bottom: 0.3rem; }
+  .why-count-item { display: inline-flex; align-items: center; gap: 0.2rem; }
+  .why-count-badge { display: inline-block; min-width: 1.2em; text-align: center; padding: 0 0.3rem; font-size: 0.65rem; font-weight: 700; border-radius: 3px; }
+  .why-count-badge.sources { background: var(--accent-light); color: var(--accent); }
+  .why-count-badge.claims { background: var(--accent-light); color: var(--accent); }
+  .why-count-badge.floating { background: var(--badge-warn); color: #000; }
+  .why-count-badge.matched { background: var(--badge-ok, #22c55e); color: #fff; }
+
   .hidden { display: none !important; }
 
   /* Sidebar toggle for mobile */
@@ -1081,6 +1101,7 @@
     // Research mode: scan assistant response (that's where DOIs/claims appear)
     if (mode === 'research' && content) {
       scanForCaptures(content, _lastAssistantBubble);
+      fetchWhyOverlay(content, _lastAssistantBubble);
     }
   }
 
@@ -1600,6 +1621,92 @@
 
       // Update pending pill
       updatePendingPill();
+    }).catch(function() {});
+  }
+
+  function fetchWhyOverlay(text, bubble) {
+    if (!bubble) return;
+    fetch(BASE + '/governor/research/why', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      var hasContent = data.injected.source_count > 0
+        || data.injected.claim_count > 0
+        || data.referenced.sources.length > 0
+        || data.referenced.candidates.length > 0;
+      if (!hasContent) return;
+
+      // Build the why toggle button
+      var toggleId = 'why-' + Date.now();
+      var toggleBtn = document.createElement('button');
+      toggleBtn.className = 'why-toggle';
+      toggleBtn.setAttribute('data-testid', 'why-toggle');
+      var summary = [];
+      if (data.injected.source_count > 0) summary.push(data.injected.source_count + ' sources');
+      if (data.injected.claim_count > 0) summary.push(data.injected.claim_count + ' claims');
+      if (data.floating.length > 0) summary.push(data.floating.length + ' floating');
+      if (data.matched.length > 0) summary.push(data.matched.length + ' matched');
+      toggleBtn.textContent = 'Why: ' + summary.join(', ');
+      toggleBtn.onclick = function(e) {
+        e.preventDefault();
+        var body = document.getElementById(toggleId);
+        body.classList.toggle('open');
+      };
+
+      // Build the expandable body
+      var bodyDiv = document.createElement('div');
+      bodyDiv.id = toggleId;
+      bodyDiv.className = 'why-body';
+      bodyDiv.setAttribute('data-testid', 'why-body');
+
+      var html = '<div class="why-counts">';
+      html += '<span class="why-count-item"><span class="why-count-badge sources">' + data.injected.source_count + '</span> sources injected</span>';
+      html += '<span class="why-count-item"><span class="why-count-badge claims">' + data.injected.claim_count + '</span> claims injected</span>';
+      if (data.matched.length > 0) html += '<span class="why-count-item"><span class="why-count-badge matched">' + data.matched.length + '</span> matched</span>';
+      if (data.floating.length > 0) html += '<span class="why-count-item"><span class="why-count-badge floating">' + data.floating.length + '</span> floating</span>';
+      html += '</div>';
+
+      if (data.matched.length > 0) {
+        html += '<div class="why-section"><div class="why-section-title">Matched (accepted)</div>';
+        data.matched.forEach(function(r) {
+          html += '<div class="why-ref matched">' + esc(r.ref_type + ':' + r.identifier) + '</div>';
+        });
+        html += '</div>';
+      }
+
+      if (data.floating.length > 0) {
+        html += '<div class="why-section"><div class="why-section-title">Floating (not accepted)</div>';
+        data.floating.forEach(function(r) {
+          html += '<div class="why-ref floating">' + esc(r.ref_type + ':' + r.identifier) + '</div>';
+        });
+        html += '</div>';
+      }
+
+      if (data.referenced.candidates.length > 0) {
+        html += '<div class="why-section"><div class="why-section-title">Candidates proposed</div>';
+        data.referenced.candidates.forEach(function(c) {
+          html += '<div class="why-ref candidate">' + esc(c) + '</div>';
+        });
+        html += '</div>';
+      }
+
+      if (data.injected.claim_ids.length > 0) {
+        html += '<div class="why-section"><div class="why-section-title">Claim IDs injected</div>';
+        html += '<div class="why-ref">' + data.injected.claim_ids.map(esc).join(', ') + '</div>';
+        html += '</div>';
+      }
+
+      bodyDiv.innerHTML = html;
+
+      // Attach to the message div (parent of bubble)
+      var msgDiv = bubble.parentElement;
+      var panel = document.createElement('div');
+      panel.className = 'why-panel';
+      panel.appendChild(toggleBtn);
+      panel.appendChild(bodyDiv);
+      msgDiv.appendChild(panel);
+
     }).catch(function() {});
   }
 

@@ -13,7 +13,7 @@ Chat + sidepanels that make governance visible: receipts, blocks, resolution flo
 ## What actually happens
 
 ```
-User types:      "Bee is from Karsovik."
+User types:      "Alice is from the Northern Reach."
 WebUI sends:     chat message to backend
 Governor sees:   definition-ish statement (capture classifier fires)
 Governor emits:  PENDING capture + receipt (patterns + spans + hash)

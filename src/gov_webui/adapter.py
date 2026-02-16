@@ -1845,6 +1845,48 @@ async def reject_research_capture(capture_id: str) -> dict[str, Any]:
     return {"success": True, "message": "Capture dismissed."}
 
 
+@app.post("/governor/research/why")
+async def research_why_overlay(request: Request) -> dict[str, Any]:
+    """Per-turn Why overlay: what was injected vs what the assistant referenced.
+
+    Expects: {"text": "assistant response text"}
+    Returns: WhyOverlay dict with injected/referenced/floating/matched.
+    """
+    from governor.research_why import build_why_overlay
+
+    body = await request.json()
+    text = body.get("text", "")
+
+    ctx, _ = _resolve_context()
+    accepted_sources: list[str] = []
+    accepted_claim_ids: list[str] = []
+
+    if ctx is not None:
+        try:
+            from governor.research_store import ResearchStore
+            store = ResearchStore(ctx.governor_dir)
+            # Mirror the logic from _build_accepted_context
+            active_claims = [
+                c for c in store.claims.values()
+                if c.status.value not in ("retracted", "superseded")
+            ]
+            active_claims.sort(key=lambda c: c.created_at, reverse=True)
+            active_claims = active_claims[:20]
+
+            seen_refs: set[str] = set()
+            for claim in active_claims:
+                if claim.source_ref and claim.source_ref not in seen_refs:
+                    accepted_sources.append(claim.source_ref)
+                    seen_refs.add(claim.source_ref)
+            accepted_sources = accepted_sources[:25]
+            accepted_claim_ids = [c.id for c in active_claims]
+        except Exception:
+            pass
+
+    overlay = build_why_overlay(text, accepted_sources, accepted_claim_ids)
+    return overlay.to_dict()
+
+
 @app.get("/governor/corrections")
 async def list_corrections(limit: int = 20) -> dict[str, Any]:
     """List past corrections/resolutions."""

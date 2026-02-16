@@ -2092,3 +2092,102 @@ class TestResearchCaptureEndpoints:
         resp = client.post("/governor/research/capture/scan", json={"text": ""})
         assert resp.status_code == 200
         assert resp.json()["captures"] == []
+
+
+# ============================================================================
+# Why Overlay
+# ============================================================================
+
+
+class TestWhyOverlay:
+    """Tests for the per-turn Why overlay endpoint."""
+
+    @pytest.fixture(autouse=True)
+    def setup_research(self, client, tmp_contexts_dir) -> None:
+        """Create research mode context for Why overlay tests."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="research")
+        adapter_mod._context_manager = cm
+        adapter_mod.GOVERNOR_MODE = "research"
+
+    def test_empty_text(self, client) -> None:
+        """Empty text returns clean overlay."""
+        resp = client.post("/governor/research/why", json={"text": ""})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["injected"]["source_count"] == 0
+        assert data["injected"]["claim_count"] == 0
+        assert data["referenced"]["sources"] == []
+        assert data["floating"] == []
+        assert data["matched"] == []
+
+    def test_floating_ref_detected(self, client) -> None:
+        """Source ref not in accepted list is flagged as floating."""
+        resp = client.post("/governor/research/why", json={
+            "text": "See doi:10.9999/ghost for more."
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["floating"]) == 1
+        assert data["floating"][0]["ref_type"] == "doi"
+
+    def test_candidate_source_detected(self, client) -> None:
+        """CANDIDATE_SOURCE lines are extracted."""
+        resp = client.post("/governor/research/why", json={
+            "text": "I found a new paper.\nCANDIDATE_SOURCE: doi:10.1234/new"
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["referenced"]["candidates"]) == 1
+        assert "doi:10.1234/new" in data["referenced"]["candidates"]
+
+    def test_with_accepted_sources(self, client, tmp_contexts_dir) -> None:
+        """When store has accepted claims with source_refs, they appear in injected."""
+        from governor.research_store import ResearchStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        ctx = cm.get("test-context")
+        store = ResearchStore(ctx.governor_dir)
+        store.add_claim("Test claim", source_ref="doi:10.1234/accepted")
+
+        resp = client.post("/governor/research/why", json={
+            "text": "Based on doi:10.1234/accepted, the result is clear."
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["injected"]["source_count"] == 1
+        assert len(data["matched"]) == 1
+        assert data["matched"][0]["identifier"] == "10.1234/accepted"
+        assert len(data["floating"]) == 0
+
+    def test_matched_vs_floating(self, client, tmp_contexts_dir) -> None:
+        """Mix of matched and floating refs classified correctly."""
+        from governor.research_store import ResearchStore
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        ctx = cm.get("test-context")
+        store = ResearchStore(ctx.governor_dir)
+        store.add_claim("Known source", source_ref="doi:10.1234/known")
+
+        resp = client.post("/governor/research/why", json={
+            "text": "See doi:10.1234/known and also doi:10.9999/ghost."
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["matched"]) == 1
+        assert len(data["floating"]) == 1
+
+    def test_overlay_structure(self, client) -> None:
+        """WhyOverlay dict has expected top-level keys."""
+        resp = client.post("/governor/research/why", json={"text": "hello"})
+        data = resp.json()
+        assert "injected" in data
+        assert "referenced" in data
+        assert "floating" in data
+        assert "matched" in data
+        assert "source_count" in data["injected"]
+        assert "claim_count" in data["injected"]
+        assert "sources" in data["referenced"]
+        assert "candidates" in data["referenced"]
