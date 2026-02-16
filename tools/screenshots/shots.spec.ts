@@ -72,11 +72,14 @@ test.describe('README screenshots', () => {
     });
   });
 
-  test('04 — violation modal', async ({ page }) => {
+  test('04 — violation modal (requires demo backend or seeded violation)', async ({ page }) => {
+    // This shot requires either:
+    // (a) a pending violation seeded into .governor/pending_violations.json, or
+    // (b) a demo backend that triggers a violation on a known input.
+    // Without either, the test passes but produces no screenshot.
     await page.goto('/');
     await disableAnimations(page);
 
-    // Check if violation modal is visible (from seeded violation state)
     const modal = page.getByTestId('violation-modal');
     if (await modal.isVisible({ timeout: 2000 }).catch(() => false)) {
       await page.screenshot({
