@@ -1727,6 +1727,124 @@ async def delete_research_link(link_id: str) -> dict[str, Any]:
     return {"success": True}
 
 
+# =============================================================================
+# Research Capture (pending promotion pipeline — claims, citations, source refs)
+# =============================================================================
+
+# In-memory pending research captures (per process; cleared on restart)
+_pending_research_captures: dict[str, dict[str, Any]] = {}
+_research_capture_counter: int = 0
+
+
+@app.post("/governor/research/capture/scan")
+async def research_capture_scan(request: CaptureRequest) -> dict[str, Any]:
+    """Scan text for claims, citations, and structured source refs."""
+    global _research_capture_counter
+
+    try:
+        from governor.capture import ResearchCaptureClassifier
+    except ImportError:
+        return {"captures": [], "error": "Research capture classifier not available."}
+
+    classifier = ResearchCaptureClassifier()
+    items, receipt = classifier.scan(request.text, message_id=request.message_id)
+
+    captures = []
+    for item in items:
+        _research_capture_counter += 1
+        cap_id = f"rcap-{_research_capture_counter}"
+        cap = {
+            "id": cap_id,
+            "kind": item.kind if isinstance(item.kind, str) else item.kind.value,
+            "confidence": round(item.confidence, 2),
+            "subject": item.subject_guess or "",
+            "statement": item.statement,
+            "field": item.field_guess or "",
+            "spans": [list(s) for s in item.evidence_spans],
+            "message_id": request.message_id,
+            "status": "pending",
+        }
+        if item.draft_payload:
+            cap["draft"] = item.draft_payload
+        _pending_research_captures[cap_id] = cap
+        captures.append(cap)
+
+    return {
+        "captures": captures,
+        "receipt": {
+            "classifier_version": receipt.classifier_version,
+            "content_hash": receipt.content_hash,
+            "pattern_hits": receipt.pattern_hits,
+        },
+    }
+
+
+@app.get("/governor/research/captures")
+async def list_pending_research_captures() -> dict[str, Any]:
+    """List all pending (unresolved) research captures."""
+    pending = [c for c in _pending_research_captures.values() if c["status"] == "pending"]
+    return {"captures": pending, "count": len(pending)}
+
+
+@app.post("/governor/research/capture/{capture_id}/accept")
+async def accept_research_capture(capture_id: str) -> dict[str, Any]:
+    """Promote a pending research capture to the claim ledger."""
+    if capture_id not in _pending_research_captures:
+        raise HTTPException(status_code=404, detail="Capture not found.")
+
+    cap = _pending_research_captures[capture_id]
+    if cap["status"] != "pending":
+        raise HTTPException(status_code=400, detail=f"Capture already {cap['status']}.")
+
+    store = _get_research_store()
+
+    kind = cap.get("kind", "claim")
+    statement = cap.get("statement", "")
+    draft = cap.get("draft", {})
+    source_ref = draft.get("source_ref", "")
+
+    if kind in ("claim", "experiment"):
+        claim = store.add_claim(
+            content=statement,
+            source_ref=source_ref,
+            captured_from=capture_id,
+        )
+        cap["status"] = "accepted"
+        cap["promoted_to"] = claim.id
+        return {"success": True, "message": f"Claim: {statement[:40]}", "id": claim.id}
+
+    elif kind == "citation":
+        # Citations with source_ref → claim with ref provenance
+        label = source_ref or statement
+        claim = store.add_claim(
+            content=label,
+            source_ref=source_ref,
+            captured_from=capture_id,
+        )
+        cap["status"] = "accepted"
+        cap["promoted_to"] = claim.id
+        return {"success": True, "message": f"Source: {label[:40]}", "id": claim.id}
+
+    elif kind == "assumption":
+        assumption = store.add_assumption(content=statement)
+        cap["status"] = "accepted"
+        cap["promoted_to"] = assumption.id
+        return {"success": True, "message": f"Assumption: {statement[:40]}", "id": assumption.id}
+
+    raise HTTPException(status_code=400, detail=f"Unknown capture kind: {kind}")
+
+
+@app.post("/governor/research/capture/{capture_id}/reject")
+async def reject_research_capture(capture_id: str) -> dict[str, Any]:
+    """Reject a pending research capture."""
+    if capture_id not in _pending_research_captures:
+        raise HTTPException(status_code=404, detail="Capture not found.")
+
+    cap = _pending_research_captures[capture_id]
+    cap["status"] = "rejected"
+    return {"success": True, "message": "Capture dismissed."}
+
+
 @app.get("/governor/corrections")
 async def list_corrections(limit: int = 20) -> dict[str, Any]:
     """List past corrections/resolutions."""

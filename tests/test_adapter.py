@@ -40,6 +40,8 @@ def reset_adapter_globals() -> None:
     adapter_mod._daemon_client = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
+    adapter_mod._pending_research_captures.clear()
+    adapter_mod._research_capture_counter = 0
     yield
     adapter_mod._bridge = None
     adapter_mod._context_manager = None
@@ -47,6 +49,8 @@ def reset_adapter_globals() -> None:
     adapter_mod._daemon_client = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
+    adapter_mod._pending_research_captures.clear()
+    adapter_mod._research_capture_counter = 0
 
 
 @pytest.fixture
@@ -1894,3 +1898,197 @@ class TestCaptureEndpoints:
         assert len(data["captures"]) >= 1
         kinds = [c["kind"] for c in data["captures"]]
         assert "world_rule" in kinds
+
+
+# ============================================================================
+# TestResearchCaptureEndpoints
+# ============================================================================
+
+
+class TestResearchCaptureEndpoints:
+    """Tests for research capture pipeline endpoints."""
+
+    def test_scan_detects_claim(self, client) -> None:
+        """POST /governor/research/capture/scan detects claim patterns."""
+        resp = client.post("/governor/research/capture/scan", json={
+            "text": "Claim: Higher temperatures increase reaction rates."
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["captures"]) >= 1
+        assert data["receipt"]["classifier_version"].startswith("research@")
+
+    def test_scan_detects_doi(self, client) -> None:
+        """DOI references are extracted as citation captures."""
+        resp = client.post("/governor/research/capture/scan", json={
+            "text": "See doi:10.1038/nature12373 for the original paper."
+        })
+        data = resp.json()
+        refs = [c for c in data["captures"] if c.get("draft", {}).get("ref_type") == "doi"]
+        assert len(refs) >= 1
+        assert "10.1038/nature12373" in refs[0]["statement"]
+
+    def test_scan_detects_cve(self, client) -> None:
+        """CVE references are extracted as citation captures."""
+        resp = client.post("/governor/research/capture/scan", json={
+            "text": "This is related to CVE-2021-44228 (Log4Shell)."
+        })
+        data = resp.json()
+        refs = [c for c in data["captures"] if c.get("draft", {}).get("ref_type") == "cve"]
+        assert len(refs) >= 1
+
+    def test_scan_detects_pypi(self, client) -> None:
+        """PyPI references are extracted as citation captures."""
+        resp = client.post("/governor/research/capture/scan", json={
+            "text": "Install with pip install requests for HTTP."
+        })
+        data = resp.json()
+        refs = [c for c in data["captures"] if c.get("draft", {}).get("ref_type") == "pypi"]
+        assert len(refs) >= 1
+
+    def test_scan_ids_prefixed_rcap(self, client) -> None:
+        """Research captures get rcap- prefix (distinguishes from fiction cap-)."""
+        resp = client.post("/governor/research/capture/scan", json={
+            "text": "Claim: X is true."
+        })
+        data = resp.json()
+        if data["captures"]:
+            assert data["captures"][0]["id"].startswith("rcap-")
+
+    def test_list_pending_empty(self, client) -> None:
+        """GET /governor/research/captures returns empty when nothing scanned."""
+        resp = client.get("/governor/research/captures")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 0
+
+    def test_list_pending_after_scan(self, client) -> None:
+        """Scanned captures appear in pending list."""
+        client.post("/governor/research/capture/scan", json={
+            "text": "Claim: The system converges under load."
+        })
+        resp = client.get("/governor/research/captures")
+        assert resp.json()["count"] >= 1
+
+    def test_accept_claim_to_ledger(self, client, tmp_contexts_dir) -> None:
+        """Accept a claim capture → promotes to ResearchStore.claims."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="research")
+        adapter_mod._context_manager = cm
+        adapter_mod._research_store = None  # force re-init
+
+        # Inject pending
+        adapter_mod._pending_research_captures["rcap-10"] = {
+            "id": "rcap-10",
+            "kind": "claim",
+            "confidence": 0.85,
+            "subject": "",
+            "statement": "Higher temperatures increase reaction rates",
+            "status": "pending",
+            "draft": {"assertion": "Higher temperatures increase reaction rates"},
+        }
+
+        resp = client.post("/governor/research/capture/rcap-10/accept", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["id"].startswith("C-")
+
+    def test_accept_citation_with_source_ref(self, client, tmp_contexts_dir) -> None:
+        """Accept a citation with DOI → promotes to ResearchStore with source_ref."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="research")
+        adapter_mod._context_manager = cm
+        adapter_mod._research_store = None
+
+        adapter_mod._pending_research_captures["rcap-20"] = {
+            "id": "rcap-20",
+            "kind": "citation",
+            "confidence": 0.95,
+            "subject": "",
+            "statement": "10.1038/nature12373",
+            "status": "pending",
+            "draft": {"source_ref": "doi:10.1038/nature12373", "ref_type": "doi"},
+        }
+
+        resp = client.post("/governor/research/capture/rcap-20/accept", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+
+    def test_accept_assumption(self, client, tmp_contexts_dir) -> None:
+        """Accept an assumption capture → promotes to ResearchStore.assumptions."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="research")
+        adapter_mod._context_manager = cm
+        adapter_mod._research_store = None
+
+        adapter_mod._pending_research_captures["rcap-30"] = {
+            "id": "rcap-30",
+            "kind": "assumption",
+            "confidence": 0.80,
+            "subject": "",
+            "statement": "Incentive structures remain stable over time",
+            "status": "pending",
+            "draft": {"assumption": "Incentive structures remain stable over time"},
+        }
+
+        resp = client.post("/governor/research/capture/rcap-30/accept", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["id"].startswith("A-")
+
+    def test_reject_capture(self, client) -> None:
+        """Rejecting sets status to 'rejected'."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._pending_research_captures["rcap-40"] = {
+            "id": "rcap-40",
+            "kind": "claim",
+            "confidence": 0.5,
+            "subject": "",
+            "statement": "Something uncertain",
+            "status": "pending",
+        }
+
+        resp = client.post("/governor/research/capture/rcap-40/reject")
+        assert resp.status_code == 200
+        assert adapter_mod._pending_research_captures["rcap-40"]["status"] == "rejected"
+
+    def test_accept_nonexistent_404(self, client) -> None:
+        """Accepting nonexistent returns 404."""
+        resp = client.post("/governor/research/capture/rcap-999/accept", json={})
+        assert resp.status_code == 404
+
+    def test_reject_nonexistent_404(self, client) -> None:
+        """Rejecting nonexistent returns 404."""
+        resp = client.post("/governor/research/capture/rcap-999/reject")
+        assert resp.status_code == 404
+
+    def test_rejected_not_in_pending(self, client) -> None:
+        """Rejected captures don't appear in pending list."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._pending_research_captures["rcap-50"] = {
+            "id": "rcap-50",
+            "kind": "claim",
+            "confidence": 0.5,
+            "subject": "",
+            "statement": "Ghost claim",
+            "status": "pending",
+        }
+        client.post("/governor/research/capture/rcap-50/reject")
+        resp = client.get("/governor/research/captures")
+        assert resp.json()["count"] == 0
+
+    def test_scan_empty_text(self, client) -> None:
+        """Empty text returns no captures."""
+        resp = client.post("/governor/research/capture/scan", json={"text": ""})
+        assert resp.status_code == 200
+        assert resp.json()["captures"] == []

@@ -391,6 +391,12 @@
 
     <!-- Research Mode Panel -->
     <div id="research-panel" class="hidden">
+      <!-- Pending Research Captures Pill -->
+      <div style="padding: 0.5rem 0.75rem 0;" id="research-pending-pill-container" class="hidden">
+        <span class="pending-pill" onclick="openCaptureDrawer()" data-testid="research-pending-pill">
+          <span id="research-pending-pill-count">0</span> pending
+        </span>
+      </div>
       <!-- Claims -->
       <div class="card">
         <div class="card-header">
@@ -1068,9 +1074,13 @@
     }
     refreshGovernor();
 
-    // Capture scan: if fiction mode, scan the user's last message
+    // Capture scan: scan for mode-specific captures
     if (mode === 'fiction' && _lastUserText) {
       scanForCaptures(_lastUserText, _lastAssistantBubble);
+    }
+    // Research mode: scan assistant response (that's where DOIs/claims appear)
+    if (mode === 'research' && content) {
+      scanForCaptures(content, _lastAssistantBubble);
     }
   }
 
@@ -1568,7 +1578,11 @@
   var _pendingCaptures = [];
 
   function scanForCaptures(text, bubble) {
-    fetch(BASE + '/governor/fiction/capture/scan', {
+    var scanUrl = mode === 'research'
+      ? BASE + '/governor/research/capture/scan'
+      : BASE + '/governor/fiction/capture/scan';
+
+    fetch(scanUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: text, message_id: 'msg-' + Date.now() })
@@ -1613,13 +1627,27 @@
 
   function updatePendingPill() {
     var pending = _pendingCaptures.filter(function(c) { return c.status === 'pending'; });
+
+    // Fiction pill
     var container = document.getElementById('pending-pill-container');
     var countEl = document.getElementById('pending-pill-count');
-    if (pending.length > 0) {
+    if (pending.length > 0 && mode === 'fiction') {
       container.classList.remove('hidden');
       countEl.textContent = pending.length;
     } else {
       container.classList.add('hidden');
+    }
+
+    // Research pill
+    var rContainer = document.getElementById('research-pending-pill-container');
+    var rCountEl = document.getElementById('research-pending-pill-count');
+    if (rContainer) {
+      if (pending.length > 0 && mode === 'research') {
+        rContainer.classList.remove('hidden');
+        rCountEl.textContent = pending.length;
+      } else {
+        rContainer.classList.add('hidden');
+      }
     }
   }
 
@@ -1668,13 +1696,17 @@
     var cap = _pendingCaptures.find(function(c) { return c.id === captureId; });
     if (!cap) return;
 
-    var body = {
-      name: cap.subject || '',
-      description: cap.statement || '',
-      capture_type: cap.kind || 'character',
-    };
+    // Research captures use a different endpoint and payload
+    var isResearch = captureId.indexOf('rcap-') === 0;
+    var acceptUrl = isResearch
+      ? BASE + '/governor/research/capture/' + captureId + '/accept'
+      : BASE + '/governor/fiction/capture/' + captureId + '/accept';
 
-    fetch(BASE + '/governor/fiction/capture/' + captureId + '/accept', {
+    var body = isResearch
+      ? {}
+      : { name: cap.subject || '', description: cap.statement || '', capture_type: cap.kind || 'character' };
+
+    fetch(acceptUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -1703,7 +1735,12 @@
     var cap = _pendingCaptures.find(function(c) { return c.id === captureId; });
     if (!cap) return;
 
-    fetch(BASE + '/governor/fiction/capture/' + captureId + '/reject', {
+    var isResearch = captureId.indexOf('rcap-') === 0;
+    var rejectUrl = isResearch
+      ? BASE + '/governor/research/capture/' + captureId + '/reject'
+      : BASE + '/governor/fiction/capture/' + captureId + '/reject';
+
+    fetch(rejectUrl, {
       method: 'POST'
     }).then(function(r) { return r.json(); }).then(function(result) {
       cap.status = 'rejected';
