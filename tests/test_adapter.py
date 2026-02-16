@@ -38,11 +38,15 @@ def reset_adapter_globals() -> None:
     adapter_mod._context_manager = None
     adapter_mod._session_store = None
     adapter_mod._daemon_client = None
+    adapter_mod._pending_captures.clear()
+    adapter_mod._capture_counter = 0
     yield
     adapter_mod._bridge = None
     adapter_mod._context_manager = None
     adapter_mod._session_store = None
     adapter_mod._daemon_client = None
+    adapter_mod._pending_captures.clear()
+    adapter_mod._capture_counter = 0
 
 
 @pytest.fixture
@@ -1627,3 +1631,266 @@ class TestAuthMiddleware:
         """GET /governor/now doesn't require auth."""
         resp = auth_client.get("/governor/now")
         assert resp.status_code == 200
+
+
+# ============================================================================
+# TestCaptureEndpoints
+# ============================================================================
+
+
+class TestCaptureEndpoints:
+    """Tests for fiction canon capture pipeline endpoints."""
+
+    def test_scan_returns_captures(self, client) -> None:
+        """POST /governor/fiction/capture/scan returns capture candidates."""
+        text = "Character: Elena is a tall warrior with silver hair"
+        resp = client.post("/governor/fiction/capture/scan", json={"text": text})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "captures" in data
+        assert "receipt" in data
+        assert data["receipt"]["classifier_version"].startswith("fiction.canon@")
+        assert len(data["receipt"]["content_hash"]) == 64  # SHA-256 hex
+
+    def test_scan_assigns_sequential_ids(self, client) -> None:
+        """Each capture gets a unique sequential ID."""
+        resp = client.post("/governor/fiction/capture/scan", json={
+            "text": "Character: Alice is brave. Character: Bob is quiet."
+        })
+        data = resp.json()
+        if len(data["captures"]) >= 2:
+            ids = [c["id"] for c in data["captures"]]
+            assert ids[0] != ids[1]
+            # IDs are sequential
+            assert all(i.startswith("cap-") for i in ids)
+
+    def test_scan_captures_start_pending(self, client) -> None:
+        """All captures start with status 'pending'."""
+        resp = client.post("/governor/fiction/capture/scan", json={
+            "text": "Character: Elena is a warrior"
+        })
+        data = resp.json()
+        for cap in data["captures"]:
+            assert cap["status"] == "pending"
+
+    def test_scan_empty_text_returns_empty(self, client) -> None:
+        """Scanning empty text returns no captures."""
+        resp = client.post("/governor/fiction/capture/scan", json={"text": ""})
+        assert resp.status_code == 200
+        assert resp.json()["captures"] == []
+
+    def test_scan_preserves_message_id(self, client) -> None:
+        """message_id from request is stored on captures."""
+        resp = client.post("/governor/fiction/capture/scan", json={
+            "text": "Character: Elena",
+            "message_id": "msg-42",
+        })
+        data = resp.json()
+        for cap in data["captures"]:
+            assert cap["message_id"] == "msg-42"
+
+    def test_list_pending_empty(self, client) -> None:
+        """GET /governor/fiction/captures returns empty when nothing scanned."""
+        resp = client.get("/governor/fiction/captures")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["captures"] == []
+        assert data["count"] == 0
+
+    def test_list_pending_after_scan(self, client) -> None:
+        """Scanned captures appear in pending list."""
+        client.post("/governor/fiction/capture/scan", json={
+            "text": "Character: Elena is a warrior"
+        })
+        resp = client.get("/governor/fiction/captures")
+        data = resp.json()
+        assert data["count"] >= 1
+        assert all(c["status"] == "pending" for c in data["captures"])
+
+    def test_accept_capture_character(self, client, tmp_contexts_dir) -> None:
+        """Accept a character capture promotes to canon anchor."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        # Scan to create a pending capture
+        scan_resp = client.post("/governor/fiction/capture/scan", json={
+            "text": "Character: Elena is a tall warrior"
+        })
+        captures = scan_resp.json()["captures"]
+        if not captures:
+            pytest.skip("No captures detected from test text")
+
+        cap_id = captures[0]["id"]
+
+        # Accept it
+        resp = client.post(f"/governor/fiction/capture/{cap_id}/accept", json={
+            "name": "Elena",
+            "capture_type": "character",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "char-elena" in data["id"]
+
+    def test_accept_capture_world_rule(self, client, tmp_contexts_dir) -> None:
+        """Accept a world_rule capture creates a DEFINITION anchor."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        # Inject a pending capture directly
+        adapter_mod._pending_captures["cap-99"] = {
+            "id": "cap-99",
+            "kind": "world_rule",
+            "confidence": 0.9,
+            "subject": "",
+            "statement": "Magic requires spoken words",
+            "status": "pending",
+        }
+
+        resp = client.post("/governor/fiction/capture/cap-99/accept", json={
+            "capture_type": "world_rule",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["id"].startswith("rule-")
+
+    def test_accept_capture_constraint(self, client, tmp_contexts_dir) -> None:
+        """Accept a constraint capture creates a PROHIBITION anchor."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        adapter_mod._pending_captures["cap-100"] = {
+            "id": "cap-100",
+            "kind": "constraint",
+            "confidence": 0.85,
+            "subject": "",
+            "statement": "No time travel allowed",
+            "status": "pending",
+        }
+
+        resp = client.post("/governor/fiction/capture/cap-100/accept", json={
+            "capture_type": "constraint",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["id"].startswith("rule-")
+
+    def test_accept_nonexistent_capture_404(self, client) -> None:
+        """Accepting a nonexistent capture returns 404."""
+        resp = client.post("/governor/fiction/capture/cap-999/accept", json={})
+        assert resp.status_code == 404
+
+    def test_accept_already_accepted_400(self, client, tmp_contexts_dir) -> None:
+        """Accepting an already-accepted capture returns 400."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        adapter_mod._pending_captures["cap-50"] = {
+            "id": "cap-50",
+            "kind": "character",
+            "confidence": 0.9,
+            "subject": "Bob",
+            "statement": "Bob is tall",
+            "status": "accepted",
+            "promoted_to": "char-bob",
+        }
+
+        resp = client.post("/governor/fiction/capture/cap-50/accept", json={
+            "name": "Bob",
+        })
+        assert resp.status_code == 400
+        assert "already accepted" in resp.json()["detail"]
+
+    def test_reject_capture(self, client) -> None:
+        """Rejecting a capture sets status to 'rejected'."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._pending_captures["cap-77"] = {
+            "id": "cap-77",
+            "kind": "character",
+            "confidence": 0.5,
+            "subject": "Nobody",
+            "statement": "Nobody is important",
+            "status": "pending",
+        }
+
+        resp = client.post("/governor/fiction/capture/cap-77/reject")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert adapter_mod._pending_captures["cap-77"]["status"] == "rejected"
+
+    def test_reject_nonexistent_capture_404(self, client) -> None:
+        """Rejecting a nonexistent capture returns 404."""
+        resp = client.post("/governor/fiction/capture/cap-999/reject")
+        assert resp.status_code == 404
+
+    def test_rejected_not_in_pending_list(self, client) -> None:
+        """Rejected captures don't appear in pending list."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._pending_captures["cap-88"] = {
+            "id": "cap-88",
+            "kind": "character",
+            "confidence": 0.5,
+            "subject": "Ghost",
+            "statement": "Ghost haunts the manor",
+            "status": "pending",
+        }
+
+        # Reject it
+        client.post("/governor/fiction/capture/cap-88/reject")
+
+        # Should not appear in pending list
+        resp = client.get("/governor/fiction/captures")
+        data = resp.json()
+        assert data["count"] == 0
+
+    def test_accepted_not_in_pending_list(self, client, tmp_contexts_dir) -> None:
+        """Accepted captures don't appear in pending list."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        adapter_mod._pending_captures["cap-60"] = {
+            "id": "cap-60",
+            "kind": "character",
+            "confidence": 0.9,
+            "subject": "Zara",
+            "statement": "Zara is a thief",
+            "status": "pending",
+        }
+
+        client.post("/governor/fiction/capture/cap-60/accept", json={
+            "name": "Zara",
+            "capture_type": "character",
+        })
+
+        resp = client.get("/governor/fiction/captures")
+        assert resp.json()["count"] == 0
+
+    def test_scan_with_rule_text(self, client) -> None:
+        """Scanning text with rule patterns detects world_rule captures."""
+        resp = client.post("/governor/fiction/capture/scan", json={
+            "text": "Rule: Magic requires spoken words to function"
+        })
+        data = resp.json()
+        assert len(data["captures"]) >= 1
+        kinds = [c["kind"] for c in data["captures"]]
+        assert "world_rule" in kinds

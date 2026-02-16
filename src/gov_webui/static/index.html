@@ -130,6 +130,33 @@
   .modal .buttons { display: flex; gap: 0.5rem; margin-top: 1rem; }
   .modal .buttons button { flex: 1; }
 
+  /* Capture chips (inline after assistant messages) */
+  .capture-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
+  .capture-chip { padding: 0.25rem 0.6rem; font-size: 0.75rem; background: var(--accent-light); color: var(--accent); border: 1px solid var(--accent); border-radius: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 0.3rem; transition: background 0.15s; }
+  .capture-chip:hover { background: var(--accent); color: #fff; }
+
+  /* Pending pill (in fiction panel header) */
+  .pending-pill { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0.5rem; font-size: 0.7rem; background: var(--badge-warn); color: #000; border-radius: 10px; cursor: pointer; font-weight: 600; margin-left: 0.5rem; }
+  .pending-pill:hover { opacity: 0.85; }
+
+  /* Capture drawer */
+  .capture-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 340px; background: var(--bg); border-left: 1px solid var(--border); z-index: 70; transform: translateX(100%); transition: transform 0.2s ease; box-shadow: -4px 0 20px rgba(0,0,0,0.15); display: flex; flex-direction: column; }
+  .capture-drawer.open { transform: translateX(0); }
+  .capture-drawer-header { padding: 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .capture-drawer-header h3 { font-size: 0.95rem; }
+  .capture-drawer-body { flex: 1; overflow-y: auto; padding: 0.75rem; }
+  .capture-drawer-close { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--muted); padding: 0.25rem; }
+  .capture-item { padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.5rem; background: var(--card-bg); }
+  .capture-item-header { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.4rem; font-size: 0.8rem; }
+  .capture-item-kind { font-weight: 600; text-transform: capitalize; }
+  .capture-item-subject { color: var(--accent); font-weight: 500; }
+  .capture-item-conf { font-size: 0.7rem; color: var(--muted); margin-left: auto; background: var(--accent-light); padding: 0.1rem 0.35rem; border-radius: 3px; }
+  .capture-item-text { font-size: 0.8rem; color: var(--fg); padding: 0.4rem; background: var(--bg); border-radius: 4px; margin-bottom: 0.5rem; border: 1px solid var(--border); }
+  .capture-item-actions { display: flex; gap: 0.3rem; }
+  .capture-item-actions button { flex: 1; padding: 0.35rem; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; background: var(--card-bg); color: var(--fg); }
+  .capture-item-actions .accept-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .capture-item-actions .accept-btn:hover { opacity: 0.9; }
+
   .hidden { display: none !important; }
 
   /* Sidebar toggle for mobile */
@@ -257,6 +284,12 @@
 
     <!-- Fiction Mode Panel -->
     <div id="fiction-panel" class="hidden">
+      <!-- Pending Captures Pill -->
+      <div style="padding: 0.5rem 0.75rem 0;" id="pending-pill-container" class="hidden">
+        <span class="pending-pill" onclick="openCaptureDrawer()" data-testid="pending-pill">
+          <span id="pending-pill-count">0</span> pending
+        </span>
+      </div>
       <!-- Characters -->
       <div class="card">
         <div class="card-header">
@@ -439,6 +472,17 @@
 </div>
 
 <!-- Sidebar toggle (mobile) -->
+<!-- Capture Drawer (slides in from right) -->
+<div class="capture-drawer" id="capture-drawer" data-testid="capture-drawer">
+  <div class="capture-drawer-header">
+    <h3>Pending Captures</h3>
+    <button class="capture-drawer-close" onclick="closeCaptureDrawer()" data-testid="close-drawer">&times;</button>
+  </div>
+  <div class="capture-drawer-body" id="capture-drawer-list">
+    <div class="empty" id="capture-empty">No pending captures.</div>
+  </div>
+</div>
+
 <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()">&#9776;</button>
 
 <!-- Add Character Modal -->
@@ -888,6 +932,8 @@
     }
   }
 
+  var _lastUserText = '';
+
   window.sendMessage = function() {
     var input = document.getElementById('input');
     var text = input.value.trim();
@@ -903,6 +949,7 @@
       }).then(function() { SM.refreshSessionList(); }).catch(function() {});
     }
 
+    _lastUserText = text;
     addMessage('user', text);
     SM.saveMessage({ role: 'user', content: text });
     input.value = '';
@@ -930,6 +977,7 @@
     document.getElementById('typing').classList.add('active');
 
     var bubble = addMessage('assistant', '');
+    _lastAssistantBubble = bubble;
     var accumulated = '';
 
     // Send full conversation history (multi-turn fix)
@@ -1009,6 +1057,8 @@
     });
   }
 
+  var _lastAssistantBubble = null;
+
   function finishGeneration(content) {
     isGenerating = false;
     document.getElementById('send-btn').disabled = false;
@@ -1017,6 +1067,11 @@
       SM.saveMessage({ role: 'assistant', content: content });
     }
     refreshGovernor();
+
+    // Capture scan: if fiction mode, scan the user's last message
+    if (mode === 'fiction' && _lastUserText) {
+      scanForCaptures(_lastUserText, _lastAssistantBubble);
+    }
   }
 
   // Textarea auto-resize and enter-to-send
@@ -1507,6 +1562,160 @@
       renderCorrections(data.corrections || []);
     }).catch(function() {});
   }
+
+  // ========== Canon Capture ==========
+
+  var _pendingCaptures = [];
+
+  function scanForCaptures(text, bubble) {
+    fetch(BASE + '/governor/fiction/capture/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, message_id: 'msg-' + Date.now() })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      var captures = data.captures || [];
+      if (captures.length === 0) return;
+
+      // Add to pending list
+      captures.forEach(function(c) { _pendingCaptures.push(c); });
+
+      // Render inline chips on the assistant bubble
+      if (bubble) {
+        renderCaptureChips(bubble, captures);
+      }
+
+      // Update pending pill
+      updatePendingPill();
+    }).catch(function() {});
+  }
+
+  function renderCaptureChips(bubble, captures) {
+    var chipsDiv = document.createElement('div');
+    chipsDiv.className = 'capture-chips';
+
+    captures.forEach(function(cap) {
+      var chip = document.createElement('button');
+      chip.className = 'capture-chip';
+      chip.setAttribute('data-testid', 'capture-chip');
+      chip.setAttribute('data-capture-id', cap.id);
+      var label = cap.kind;
+      if (cap.subject) label += ': ' + cap.subject;
+      chip.innerHTML = '&#10022; ' + esc(label);
+      chip.onclick = function(e) {
+        e.preventDefault();
+        openCaptureDrawer();
+      };
+      chipsDiv.appendChild(chip);
+    });
+
+    bubble.appendChild(chipsDiv);
+  }
+
+  function updatePendingPill() {
+    var pending = _pendingCaptures.filter(function(c) { return c.status === 'pending'; });
+    var container = document.getElementById('pending-pill-container');
+    var countEl = document.getElementById('pending-pill-count');
+    if (pending.length > 0) {
+      container.classList.remove('hidden');
+      countEl.textContent = pending.length;
+    } else {
+      container.classList.add('hidden');
+    }
+  }
+
+  window.openCaptureDrawer = function() {
+    var list = document.getElementById('capture-drawer-list');
+    var empty = document.getElementById('capture-empty');
+    var pending = _pendingCaptures.filter(function(c) { return c.status === 'pending'; });
+
+    // Clear and rebuild
+    list.innerHTML = '';
+    if (pending.length === 0) {
+      list.innerHTML = '<div class="empty">No pending captures.</div>';
+    } else {
+      pending.forEach(function(cap) {
+        var item = document.createElement('div');
+        item.className = 'capture-item';
+        item.setAttribute('data-capture-id', cap.id);
+        item.setAttribute('data-testid', 'capture-item');
+
+        var header = '<div class="capture-item-header">'
+          + '<span class="capture-item-kind">' + esc(cap.kind) + '</span>'
+          + (cap.subject ? '<span class="capture-item-subject">' + esc(cap.subject) + '</span>' : '')
+          + '<span class="capture-item-conf">' + Math.round(cap.confidence * 100) + '%</span>'
+          + '</div>';
+
+        var text = '<div class="capture-item-text">' + esc(cap.statement) + '</div>';
+
+        var actions = '<div class="capture-item-actions">'
+          + '<button class="accept-btn" onclick="acceptCapture(\'' + esc(cap.id) + '\')" data-testid="accept-capture">Accept</button>'
+          + '<button onclick="rejectCapture(\'' + esc(cap.id) + '\')" data-testid="reject-capture">Dismiss</button>'
+          + '</div>';
+
+        item.innerHTML = header + text + actions;
+        list.appendChild(item);
+      });
+    }
+
+    document.getElementById('capture-drawer').classList.add('open');
+  };
+
+  window.closeCaptureDrawer = function() {
+    document.getElementById('capture-drawer').classList.remove('open');
+  };
+
+  window.acceptCapture = function(captureId) {
+    var cap = _pendingCaptures.find(function(c) { return c.id === captureId; });
+    if (!cap) return;
+
+    var body = {
+      name: cap.subject || '',
+      description: cap.statement || '',
+      capture_type: cap.kind || 'character',
+    };
+
+    fetch(BASE + '/governor/fiction/capture/' + captureId + '/accept', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function(r) { return r.json(); }).then(function(result) {
+      if (result.success) {
+        cap.status = 'accepted';
+        // Remove chip from chat
+        var chip = document.querySelector('[data-capture-id="' + captureId + '"].capture-chip');
+        if (chip) chip.remove();
+        // Remove from drawer
+        var item = document.querySelector('.capture-item[data-capture-id="' + captureId + '"]');
+        if (item) item.remove();
+        // Refresh sidebar panels
+        updatePendingPill();
+        refreshGovernor();
+        // Check if drawer is now empty
+        var remaining = _pendingCaptures.filter(function(c) { return c.status === 'pending'; });
+        if (remaining.length === 0) closeCaptureDrawer();
+      }
+    }).catch(function(err) {
+      console.error('Accept capture failed:', err);
+    });
+  };
+
+  window.rejectCapture = function(captureId) {
+    var cap = _pendingCaptures.find(function(c) { return c.id === captureId; });
+    if (!cap) return;
+
+    fetch(BASE + '/governor/fiction/capture/' + captureId + '/reject', {
+      method: 'POST'
+    }).then(function(r) { return r.json(); }).then(function(result) {
+      cap.status = 'rejected';
+      var chip = document.querySelector('[data-capture-id="' + captureId + '"].capture-chip');
+      if (chip) chip.remove();
+      var item = document.querySelector('.capture-item[data-capture-id="' + captureId + '"]');
+      if (item) item.remove();
+      updatePendingPill();
+      var remaining = _pendingCaptures.filter(function(c) { return c.status === 'pending'; });
+      if (remaining.length === 0) closeCaptureDrawer();
+    }).catch(function() {});
+  };
 
   // ========== Modal Helpers ==========
 

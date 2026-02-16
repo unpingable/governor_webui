@@ -978,6 +978,19 @@ def _get_research_store() -> Any:
     return _research_store
 
 
+class CaptureRequest(BaseModel):
+    """Request to scan text for canon-worthy statements."""
+    text: str
+    message_id: str = ""
+
+
+class CaptureAcceptRequest(BaseModel):
+    """Request to promote a pending capture to canon."""
+    name: str = ""           # Character/entity name (may override detected)
+    description: str = ""    # Description text
+    capture_type: str = ""   # character, world_rule, relationship, constraint
+
+
 class CharacterRequest(BaseModel):
     """Request to add a character."""
     name: str
@@ -1213,6 +1226,141 @@ async def add_forbidden(request: ForbiddenRequest) -> dict[str, Any]:
         "message": "I'll watch for that.",
         "id": forbid_id,
     }
+
+
+# =============================================================================
+# Canon Capture (fiction mode — pending promotion pipeline)
+# =============================================================================
+
+# In-memory pending captures (per process; cleared on restart)
+_pending_captures: dict[str, dict[str, Any]] = {}
+_capture_counter: int = 0
+
+
+@app.post("/governor/fiction/capture/scan")
+async def capture_scan(request: CaptureRequest) -> dict[str, Any]:
+    """Scan text for canon-worthy statements. Returns capture candidates."""
+    global _capture_counter
+
+    try:
+        from fiction_governor.canon_capture import CanonCaptureClassifier
+    except ImportError:
+        return {"captures": [], "error": "Canon capture classifier not available."}
+
+    classifier = CanonCaptureClassifier()
+    items, receipt = classifier.scan(request.text)
+
+    captures = []
+    for item in items:
+        _capture_counter += 1
+        cap_id = f"cap-{_capture_counter}"
+        cap = {
+            "id": cap_id,
+            "kind": item.kind if isinstance(item.kind, str) else item.kind.value,
+            "confidence": round(item.confidence, 2),
+            "subject": item.subject_guess or "",
+            "statement": item.statement,
+            "field": item.field_guess or "",
+            "spans": [list(s) for s in item.evidence_spans],
+            "message_id": request.message_id,
+            "status": "pending",
+        }
+        if item.draft_payload:
+            cap["draft"] = item.draft_payload
+        _pending_captures[cap_id] = cap
+        captures.append(cap)
+
+    return {
+        "captures": captures,
+        "receipt": {
+            "classifier_version": receipt.classifier_version,
+            "content_hash": receipt.content_hash,
+            "pattern_hits": receipt.pattern_hits,
+        },
+    }
+
+
+@app.get("/governor/fiction/captures")
+async def list_pending_captures() -> dict[str, Any]:
+    """List all pending (unresolved) captures."""
+    pending = [c for c in _pending_captures.values() if c["status"] == "pending"]
+    return {"captures": pending, "count": len(pending)}
+
+
+@app.post("/governor/fiction/capture/{capture_id}/accept")
+async def accept_capture(capture_id: str, request: CaptureAcceptRequest) -> dict[str, Any]:
+    """Promote a pending capture to canon (creates character or world rule anchor)."""
+    if capture_id not in _pending_captures:
+        raise HTTPException(status_code=404, detail="Capture not found.")
+
+    cap = _pending_captures[capture_id]
+    if cap["status"] != "pending":
+        raise HTTPException(status_code=400, detail=f"Capture already {cap['status']}.")
+
+    ctx, _ = _resolve_context()
+    if ctx is None:
+        raise HTTPException(status_code=400, detail="No governor context initialized.")
+
+    from governor.continuity import Anchor, AnchorType, Severity, create_registry
+
+    registry = create_registry(ctx.governor_dir)
+
+    kind = request.capture_type or cap.get("kind", "character")
+    name = request.name or cap.get("subject", "")
+    desc = request.description or cap.get("statement", "")
+
+    if kind in ("character", "relationship"):
+        char_id = f"char-{name.lower().replace(' ', '-')}" if name else f"char-cap-{capture_id}"
+        anchor = Anchor(
+            id=char_id,
+            anchor_type=AnchorType.CANON,
+            description=f"{name}: {desc}" if name else desc,
+            severity=Severity.REJECT,
+        )
+        registry.register(anchor)
+        registry.save(ctx.governor_dir / "continuity" / "anchors.json")
+        cap["status"] = "accepted"
+        cap["promoted_to"] = char_id
+        return {"success": True, "message": f"Canon: {name or char_id}", "id": char_id}
+
+    elif kind in ("world_rule", "constraint"):
+        rule_count = len([a for a in registry.all() if "rule-" in a.id])
+        rule_id = f"rule-{rule_count + 1}"
+
+        if kind == "constraint":
+            patterns = [p.strip() for p in desc.split(",") if p.strip()]
+            anchor = Anchor(
+                id=rule_id,
+                anchor_type=AnchorType.PROHIBITION,
+                description=desc,
+                forbidden_patterns=patterns,
+                severity=Severity.REJECT,
+            )
+        else:
+            anchor = Anchor(
+                id=rule_id,
+                anchor_type=AnchorType.DEFINITION,
+                description=desc,
+                severity=Severity.WARN,
+            )
+        registry.register(anchor)
+        registry.save(ctx.governor_dir / "continuity" / "anchors.json")
+        cap["status"] = "accepted"
+        cap["promoted_to"] = rule_id
+        return {"success": True, "message": f"Canon: {desc[:40]}", "id": rule_id}
+
+    raise HTTPException(status_code=400, detail=f"Unknown capture kind: {kind}")
+
+
+@app.post("/governor/fiction/capture/{capture_id}/reject")
+async def reject_capture(capture_id: str) -> dict[str, Any]:
+    """Reject a pending capture."""
+    if capture_id not in _pending_captures:
+        raise HTTPException(status_code=404, detail="Capture not found.")
+
+    cap = _pending_captures[capture_id]
+    cap["status"] = "rejected"
+    return {"success": True, "message": "Capture dismissed."}
 
 
 @app.get("/governor/code/decisions")
