@@ -10,29 +10,53 @@ Chat + sidepanels that make governance visible: receipts, blocks, resolution flo
 
 ---
 
-## What actually happens
+## Two loops, one cockpit
+
+Every mode runs the same two loops. The sidebar changes; the enforcement doesn't.
+
+### 1. Capture: draft > pending > accept
+
+The assistant says something. The capture classifier fires. Detections appear as **chips** on the message bubble and collect in a **pending drawer**. Nothing auto-promotes. Accept writes to the canonical store with a receipt. Reject logs the decision and discards.
 
 ```
-User types:      "Alice is from the Northern Reach."
-WebUI sends:     chat message to backend
-Governor sees:   definition-ish statement (capture classifier fires)
-Governor emits:  PENDING capture + receipt (patterns + spans + hash)
-UI shows:        chip on message + pending drawer → "Add to canon?"
+Assistant says:  "The scaling exponent is 0.76 (doi:10.1234/kaplan2020)."
+Governor sees:   claim + DOI source reference
+UI shows:        chip on message → pending drawer → "Accept claim?"
 User clicks:     ACCEPT
-Governor writes: canonical character entry + receipt
-Next turn:       assistant stays consistent because canon is real
+Governor writes: claim entry + source_ref binding + receipt
+Next turn:       system prompt includes accepted sources + claims
+Why overlay:     "1 source injected, 1 matched, 0 floating"
 ```
 
-When a constraint is violated:
+### 2. Violations: block > resolve > continue
+
+When output violates a constraint, chat is blocked until you choose:
 
 ```
-Assistant outputs: "Use eval() here…"
+Assistant outputs: "Use eval() here..."
 Governor sees:     constraint violation (no_eval_anchor)
 Governor acts:     BLOCK + resolution options
-UI enforces:       chat is paused until you Fix / Revise / Proceed
+UI enforces:       Fix / Revise / Proceed — nothing else accepted
 ```
 
 This is not "chat with tabs." It's a cockpit for a write-gated system.
+
+---
+
+## Modes
+
+Modes are **policy bundles + sidepanels**. Same core loop, different constraints.
+
+| Mode | Focus | Sidebar |
+|------|-------|---------|
+| **Research** (`:8003`) | Claims + provenance | Claims, Assumptions, Uncertainties, Links, Why overlay |
+| **Code** (`:8002`) | Decisions + constraints | Decisions, Constraints, Compare |
+| **Fiction** (`:8001`) | Continuity + canon | Characters, World Rules, Forbidden |
+| General | No mode-specific policy | Status + Corrections |
+
+Research mode is where the capture loop is most visible: DOI/arXiv/CVE/RFC/PyPI references get extracted, accepted sources constrain the next turn, and the Why overlay shows exactly which sources were injected vs referenced vs floating.
+
+Fiction mode is the proof that governance isn't just for crisp ground truth. If it works where facts are fuzzy — tracking canon, tone, consent — it's not compliance middleware. It generalizes.
 
 ---
 
@@ -44,9 +68,9 @@ Brings up **three isolated stacks** with persistent state volumes:
 
 ```bash
 docker-compose up -d
-# Fiction:   http://127.0.0.1:8001
-# Code:      http://127.0.0.1:8002
-# Research:  http://127.0.0.1:8003
+# Research: http://127.0.0.1:8003
+# Code:     http://127.0.0.1:8002
+# Fiction:  http://127.0.0.1:8001
 ```
 
 Or use the one-liner scripts for specific backends:
@@ -56,7 +80,7 @@ Or use the one-liner scripts for specific backends:
 ./start-codex.sh        # Codex backend (auto-detects Node + architecture)
 ```
 
-Quick sanity: `curl -s http://127.0.0.1:8001/health`
+Quick sanity: `curl -s http://127.0.0.1:8003/health`
 
 ### Local dev
 
@@ -79,43 +103,6 @@ The UI talks to multiple inference backends. The governor enforces constraints r
 | **Ollama** | Free (local) | `BACKEND_TYPE=ollama` + `OLLAMA_HOST=http://localhost:11434` |
 
 Switch at runtime via the sidebar dropdown or `POST /v1/backends/switch`.
-
----
-
-## Modes
-
-Modes are **policy bundles + sidepanels**. Same core loop, different constraints.
-
-| Mode | Focus | Sidebar |
-|------|-------|---------|
-| **Fiction** (`:8001`) | Continuity + canon | Characters, World Rules, Forbidden |
-| **Code** (`:8002`) | Decisions + constraints | Decisions, Constraints, Compare |
-| **Research** (`:8003`) | Claims + provenance | Claims, Assumptions, Uncertainties, Links |
-| General | No mode-specific policy | Status + Corrections |
-
----
-
-## The two loops that matter
-
-### 1. Capture: draft > pending > accept
-
-After each assistant response, the capture classifier fires. High-confidence detections appear as **chips** on the message bubble and collect in a **pending drawer**.
-
-- Fiction: characters, world rules, relationships, constraints
-- Research: claims, assumptions, experiments, citations (DOI/PyPI/CVE/RFC/arXiv)
-- Code: work items, decisions, hypotheses, patch intents
-
-**Nothing auto-promotes.** Everything starts PENDING. Accept writes to the canonical store with a receipt. Reject logs the decision and discards.
-
-### 2. Violations: block > resolve > continue
-
-When output violates a constraint, the UI blocks normal chat until you choose:
-
-1. **fix** — rewrite the response to comply
-2. **revise** — update the constraint
-3. **proceed** — allow once and log an exception
-
-While a violation is pending, only resolution commands are accepted.
 
 ---
 
@@ -163,7 +150,7 @@ All configuration is env vars.
 
 ```bash
 pip install -e ".[dev]"
-python3 -m pytest tests/ -v    # 276 tests
+python3 -m pytest tests/ -v    # 282 tests
 ```
 
 ## Docs
