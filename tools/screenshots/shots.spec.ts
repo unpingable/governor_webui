@@ -27,7 +27,7 @@ test.describe('README screenshots', () => {
     await disableAnimations(page);
 
     // Wait for sidebar to populate (governor polling)
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
 
     await page.screenshot({
       path: 'docs/img/01_research_home.png',
@@ -56,12 +56,12 @@ test.describe('README screenshots', () => {
     await page.goto('/');
     await disableAnimations(page);
 
-    // Wait for chat to have content
-    await page.waitForTimeout(1500);
+    // Wait for seeded chat to render (assistant message with DOI refs)
+    await page.waitForTimeout(2000);
 
-    // Click the Why toggle if present
+    // Click the Why toggle if present on an assistant message
     const whyToggle = page.getByTestId('why-toggle').first();
-    if (await whyToggle.isVisible({ timeout: 3000 }).catch(() => false)) {
+    if (await whyToggle.isVisible({ timeout: 5000 }).catch(() => false)) {
       await whyToggle.click();
       await expect(page.getByTestId('why-body').first()).toBeVisible();
     }
@@ -89,7 +89,9 @@ test.describe('README screenshots', () => {
     }
   });
 
-  test('05 — dashboard overview', async ({ page }) => {
+  test('05 — dashboard overview (dark mode)', async ({ page }) => {
+    // Dashboard in dark mode for visual variety
+    await page.emulateMedia({ colorScheme: 'dark' });
     await page.goto('/dashboard');
     await disableAnimations(page);
     await page.waitForTimeout(1500);
