@@ -952,9 +952,28 @@
 
   function renderConversation() {
     clearMessages();
+    var assistantBubbles = [];
     for (var i = 0; i < SM.conversationMessages.length; i++) {
       var m = SM.conversationMessages[i];
-      addMessage(m.role, m.content);
+      var bubble = addMessage(m.role, m.content);
+      if (m.role === 'assistant') {
+        assistantBubbles.push({ bubble: bubble, content: m.content });
+      }
+    }
+
+    // Scan historical assistant messages for captures + Why overlay (one-time on load)
+    if (mode === 'research') {
+      assistantBubbles.forEach(function(item) {
+        scanForCaptures(item.content, item.bubble);
+        fetchWhyOverlay(item.content, item.bubble);
+      });
+    }
+    if (mode === 'fiction') {
+      // Fiction scans user text, but for history we scan assistant bubbles
+      // to show any canon-worthy detections
+      assistantBubbles.forEach(function(item) {
+        scanForCaptures(item.content, item.bubble);
+      });
     }
   }
 
@@ -1343,7 +1362,7 @@
     var uncertain = ed.open_uncertain || 0;
     setStatus(
       total === 0 ? 'ok' : total <= 10 ? 'needs_attention' : 'block',
-      'ED: ' + total + ' | ' + floating + ' floating | ' + uncertain + ' uncertain'
+      'Discipline: ' + total + ' | ' + floating + ' floating | ' + uncertain + ' uncertain'
     );
   }
 

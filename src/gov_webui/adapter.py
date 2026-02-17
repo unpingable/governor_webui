@@ -848,7 +848,7 @@ async def governor_now() -> dict[str, Any]:
             store = ResearchStore(ctx.governor_dir)
             ed = store.compute_ed()
             now_result["sentence"] = (
-                f"ED: {ed['total']} | {ed['floating']} floating | "
+                f"Discipline: {ed['total']} | {ed['floating']} floating | "
                 f"{ed['open_uncertain']} uncertain"
             )
             now_result["research_ed"] = ed
