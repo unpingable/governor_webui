@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for gov_webui.summaries — referee-voice ViewModel summaries."""
 
 import pytest

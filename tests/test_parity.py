@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Parity tripwire: verify the webui chat path delegates to the daemon.
 
 The split-brain fix routes /v1/chat/completions through the daemon's

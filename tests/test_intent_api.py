@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for v2 Intent Compiler API routes (/v2/intent/*)."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Thin JSON-RPC 2.0 client over Unix socket for the governor daemon.
 
 Provides only the chat-path methods needed by the webui adapter.

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Referee-voice summaries derived from GovernorViewModel.
 

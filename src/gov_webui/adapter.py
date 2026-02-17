@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 OpenAI-compatible API adapter with Governor integration.
 

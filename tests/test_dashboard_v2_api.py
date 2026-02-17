@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for v2 Dashboard API routes in webui/adapter.py."""
 
 from __future__ import annotations
