@@ -57,7 +57,7 @@ def _make_stability(drift_alert: str = "NONE", **kw) -> StabilityView:
     return StabilityView(
         rejection_rate=kw.get("rejection_rate", 0.0),
         claim_churn=kw.get("claim_churn", 0.0),
-        contradiction_density=kw.get("contradiction_density", 0.0),
+        contradiction_open_rate=kw.get("contradiction_open_rate", 0.0),
         drift_alert=drift_alert,
         drift_signals=kw.get("drift_signals", {}),
     )
