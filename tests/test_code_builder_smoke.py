@@ -89,7 +89,7 @@ class TestCodeBuilderSmokeLoop:
         assert r.json()["intent"]["locked"] is True
         v += 1
 
-        # 4. Set contract
+        # 4. Set contract with wizard config
         r = c.put("/governor/code/project/contract", json={
             "description": "CSV to JSON converter",
             "inputs": [{"name": "filepath", "type": "str"}],
@@ -97,12 +97,26 @@ class TestCodeBuilderSmokeLoop:
             "constraints": ["No pandas", "Handle UTF-8"],
             "transport": "stdio",
             "expected_version": v,
+            "config": {
+                "artifact_type": "tool",
+                "length": "medium",
+                "voice": ["dry"],
+                "citations": "none",
+                "bans": [],
+                "strict": False,
+            },
         })
         assert r.status_code == 200
         contract = r.json()["contract"]
         assert contract["description"] == "CSV to JSON converter"
         assert len(contract["inputs"]) == 1
         assert contract["constraints"] == ["No pandas", "Handle UTF-8"]
+        assert contract["config"]["artifact_type"] == "tool"
+        assert contract["config_hash"] is not None
+        assert len(contract["config_hash"]) == 16
+        assert contract["config_hash_full"] is not None
+        assert len(contract["config_hash_full"]) == 64
+        assert contract["config_hash_full"].startswith(contract["config_hash"])
         v += 1
 
         # 5. Create plan phases and items

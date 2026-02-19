@@ -2614,3 +2614,169 @@ class TestCodeBuilderRun:
         data = resp.json()
         assert data["success"] is True
         assert "HELLO" in data["stdout"]
+
+
+# ============================================================================
+# Constraints injection tests
+# ============================================================================
+
+
+class TestConstraintsInjection:
+    """Test _build_constraints_message() and chat injection."""
+
+    def test_constraints_injected_when_config_present(self, tmp_contexts_dir) -> None:
+        """When config is set on the contract, _build_constraints_message returns a system message."""
+        import gov_webui.adapter as adapter_mod
+
+        # Reset singletons
+        adapter_mod._project_store = None
+        adapter_mod._research_project_store = None
+        adapter_mod.GOVERNOR_MODE = "code"
+        adapter_mod.GOVERNOR_CONTEXTS_DIR = str(tmp_contexts_dir)
+        adapter_mod.GOVERNOR_CONTEXT_ID = "constraints-test"
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("constraints-test", mode="code")
+        adapter_mod._context_manager = cm
+
+        from fastapi.testclient import TestClient
+        client = TestClient(adapter_mod.app, raise_server_exceptions=False)
+
+        # Set contract with config
+        client.put("/governor/code/project/contract", json={
+            "description": "test",
+            "config": {
+                "artifact_type": "tool",
+                "length": "medium",
+                "voice": ["dry", "wry"],
+                "citations": "none",
+                "bans": ["studies show"],
+                "strict": False,
+            },
+        })
+
+        msg = adapter_mod._build_constraints_message()
+        assert msg is not None
+        assert msg["role"] == "system"
+        assert "[CONSTRAINTS" in msg["content"]
+        assert "artifact_type: tool" in msg["content"]
+        assert "length_band: medium" in msg["content"]
+        assert "voice: dry, wry" in msg["content"]
+        assert "bans: studies show" in msg["content"]
+        assert "[/CONSTRAINTS]" in msg["content"]
+
+        # Clean up
+        adapter_mod._project_store = None
+        adapter_mod._context_manager = None
+
+    def test_constraints_inserted_after_system_messages(self, tmp_contexts_dir) -> None:
+        """Constraints system message goes after existing system messages."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._project_store = None
+        adapter_mod.GOVERNOR_MODE = "code"
+        adapter_mod.GOVERNOR_CONTEXTS_DIR = str(tmp_contexts_dir)
+        adapter_mod.GOVERNOR_CONTEXT_ID = "pos-test"
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("pos-test", mode="code")
+        adapter_mod._context_manager = cm
+
+        from fastapi.testclient import TestClient
+        client = TestClient(adapter_mod.app, raise_server_exceptions=False)
+
+        client.put("/governor/code/project/contract", json={
+            "description": "test",
+            "config": {"artifact_type": "tool", "length": "short"},
+        })
+
+        # Simulate message injection
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello"},
+        ]
+        msg = adapter_mod._build_constraints_message()
+        assert msg is not None
+
+        insert_idx = 0
+        for i, m in enumerate(messages):
+            if m["role"] == "system":
+                insert_idx = i + 1
+        messages.insert(insert_idx, msg)
+
+        assert messages[0]["role"] == "system"
+        assert messages[0]["content"] == "You are a helpful assistant."
+        assert messages[1]["role"] == "system"
+        assert "[CONSTRAINTS" in messages[1]["content"]
+        assert messages[2]["role"] == "user"
+
+        adapter_mod._project_store = None
+        adapter_mod._context_manager = None
+
+    def test_no_constraints_when_config_absent(self, tmp_contexts_dir) -> None:
+        """No constraints message when contract has no config."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._project_store = None
+        adapter_mod.GOVERNOR_MODE = "code"
+        adapter_mod.GOVERNOR_CONTEXTS_DIR = str(tmp_contexts_dir)
+        adapter_mod.GOVERNOR_CONTEXT_ID = "no-config-test"
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("no-config-test", mode="code")
+        adapter_mod._context_manager = cm
+
+        from fastapi.testclient import TestClient
+        client = TestClient(adapter_mod.app, raise_server_exceptions=False)
+
+        # Set contract without config
+        client.put("/governor/code/project/contract", json={
+            "description": "test",
+        })
+
+        msg = adapter_mod._build_constraints_message()
+        assert msg is None  # No constraints, no config
+
+        adapter_mod._project_store = None
+        adapter_mod._context_manager = None
+
+    def test_no_constraints_in_general_mode(self) -> None:
+        """No injection in general mode."""
+        import gov_webui.adapter as adapter_mod
+
+        old_mode = adapter_mod.GOVERNOR_MODE
+        adapter_mod.GOVERNOR_MODE = "general"
+        msg = adapter_mod._build_constraints_message()
+        assert msg is None
+        adapter_mod.GOVERNOR_MODE = old_mode
+
+    def test_raw_constraints_fallback(self, tmp_contexts_dir) -> None:
+        """When no config but constraints list present, uses raw fallback."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._project_store = None
+        adapter_mod.GOVERNOR_MODE = "code"
+        adapter_mod.GOVERNOR_CONTEXTS_DIR = str(tmp_contexts_dir)
+        adapter_mod.GOVERNOR_CONTEXT_ID = "raw-test"
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("raw-test", mode="code")
+        adapter_mod._context_manager = cm
+
+        from fastapi.testclient import TestClient
+        client = TestClient(adapter_mod.app, raise_server_exceptions=False)
+
+        client.put("/governor/code/project/contract", json={
+            "description": "test",
+            "constraints": ["No pandas", "Handle UTF-8"],
+        })
+
+        msg = adapter_mod._build_constraints_message()
+        assert msg is not None
+        assert msg["role"] == "system"
+        assert "[CONSTRAINTS]" in msg["content"]
+        assert "No pandas" in msg["content"]
+        assert "Handle UTF-8" in msg["content"]
+
+        adapter_mod._project_store = None
+        adapter_mod._context_manager = None

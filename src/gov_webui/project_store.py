@@ -53,6 +53,40 @@ CODE_EXTENSIONS = {".py", ".txt", ".json", ".toml", ".cfg"}
 RESEARCH_EXTENSIONS = {".md", ".txt", ".bib", ".json", ".toml", ".csv"}
 ALLOWED_EXTENSIONS = CODE_EXTENSIONS  # default for backwards compat
 
+# Known-set fields: order doesn't matter, sort for stability
+_SET_FIELDS = {"voice", "bans", "structure"}
+
+
+def canonicalize_config(config):
+    """Recursively sort dict keys and normalize strings."""
+    if isinstance(config, dict):
+        return {k: canonicalize_config(v) for k, v in sorted(config.items())}
+    if isinstance(config, list):
+        return [canonicalize_config(v) for v in config]
+    if isinstance(config, str):
+        return config.strip()
+    return config
+
+
+def _canonicalize_with_set_sort(config: dict) -> dict:
+    """Full canonicalization: recursive + sort known-set lists."""
+    result = canonicalize_config(config)
+    for key in _SET_FIELDS:
+        if key in result and isinstance(result[key], list):
+            result[key] = sorted(result[key])
+    return result
+
+
+def compute_config_hash(config: dict) -> tuple[str, str]:
+    """Returns (short_hash_16hex, full_hash_64hex) of canonical config."""
+    canonical = json.dumps(
+        _canonicalize_with_set_sort(config),
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    full = hashlib.sha256(canonical.encode()).hexdigest()
+    return full[:16], full
+
 
 # ---------------------------------------------------------------------------
 # Data Models
@@ -77,6 +111,9 @@ class Contract(BaseModel):
     outputs: list[ContractField] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
     transport: str = "stdio"
+    config: dict | None = None
+    config_hash: str | None = None
+    config_hash_full: str | None = None
 
 
 class PlanItem(BaseModel):

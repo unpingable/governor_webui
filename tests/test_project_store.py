@@ -16,6 +16,8 @@ from gov_webui.project_store import (
     PlanItemStatus,
     StaleVersionError,
     _validate_path,
+    canonicalize_config,
+    compute_config_hash,
 )
 
 
@@ -117,6 +119,89 @@ class TestContract:
         assert len(result.inputs) == 1
         assert result.inputs[0].name == "filepath"
         assert result.constraints == ["No pandas"]
+
+    def test_contract_with_config_round_trips(self, store: CodeProjectStore) -> None:
+        config = {"artifact_type": "essay", "length": "medium", "voice": ["dry", "wry"]}
+        short, full = compute_config_hash(config)
+        contract = Contract(
+            description="Test",
+            config=config,
+            config_hash=short,
+            config_hash_full=full,
+        )
+        result = store.update_contract(contract)
+        assert result.config == config
+        assert result.config_hash == short
+        assert result.config_hash_full == full
+
+    def test_contract_without_config_backward_compat(self, tmp_path: Path) -> None:
+        """Old project.json without config fields loads fine."""
+        gov_dir = tmp_path / ".governor"
+        code_dir = gov_dir / "code"
+        code_dir.mkdir(parents=True)
+        old_state = {
+            "version": 3,
+            "intent": {"text": "test", "locked": False},
+            "contract": {
+                "description": "old contract",
+                "inputs": [],
+                "outputs": [],
+                "constraints": ["no pandas"],
+                "transport": "stdio",
+            },
+            "plan": {"phases": []},
+            "files": {},
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "updated_at": "2025-01-01T00:00:00+00:00",
+        }
+        (code_dir / "project.json").write_text(json.dumps(old_state))
+        store = CodeProjectStore(gov_dir)
+        state = store.get_state()
+        assert state["contract"]["description"] == "old contract"
+        assert state["contract"]["config"] is None
+        assert state["contract"]["config_hash"] is None
+
+
+# ── Config canonicalization + hashing ────────────────────────────────────
+
+class TestConfigHash:
+    def test_canonicalize_config_sorts_set_fields(self) -> None:
+        config = {"voice": ["wry", "dry"], "bans": ["b", "a"], "length": "medium"}
+        result = canonicalize_config(config)
+        # canonicalize_config itself does NOT sort lists (only _canonicalize_with_set_sort does)
+        # But it does sort dict keys
+        assert list(result.keys()) == ["bans", "length", "voice"]
+
+    def test_compute_config_hash_deterministic(self) -> None:
+        """Different key orders produce the same hash."""
+        c1 = {"length": "medium", "artifact_type": "essay", "voice": ["wry", "dry"]}
+        c2 = {"voice": ["dry", "wry"], "artifact_type": "essay", "length": "medium"}
+        assert compute_config_hash(c1) == compute_config_hash(c2)
+
+    def test_compute_config_hash_known_vector(self) -> None:
+        """Hardcoded test vector for cross-language verification."""
+        config = {
+            "artifact_type": "essay",
+            "bans": ["studies show", "experts agree"],
+            "length": "medium",
+            "voice": ["wry", "dry"],
+        }
+        short, full = compute_config_hash(config)
+        assert full == "a5e80158a5636c553943b23fb8559db9f1f0cf250a8d5f6bb914afe720be1cc8"
+        assert short == "a5e80158a5636c55"
+
+    def test_full_and_short_hash_relationship(self) -> None:
+        config = {"artifact_type": "tool", "length": "short"}
+        short, full = compute_config_hash(config)
+        assert len(short) == 16
+        assert len(full) == 64
+        assert full.startswith(short)
+
+    def test_string_normalization(self) -> None:
+        """Whitespace on strings is stripped."""
+        c1 = {"artifact_type": "  essay  ", "length": "medium"}
+        c2 = {"artifact_type": "essay", "length": "medium"}
+        assert compute_config_hash(c1) == compute_config_hash(c2)
 
 
 # ── Plan state machine ────────────────────────────────────────────────────

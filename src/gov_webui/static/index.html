@@ -260,6 +260,39 @@
   .code-block-actions button.accept-btn:hover { opacity: 0.9; }
   .code-block-actions .accepted-badge { font-size: 0.75rem; color: var(--badge-ok); font-weight: 500; }
   .constraint-text { color: var(--badge-block); font-size: 0.8rem; }
+
+  /* Wizard */
+  .modal.wizard { max-width: 640px; }
+  .wizard-layout { display: flex; gap: 1rem; }
+  .wizard-left { flex: 1; min-width: 0; }
+  .wizard-right { width: 220px; flex-shrink: 0; }
+  .wizard-preview { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.7rem; background: var(--code-bg, #1a1a2e); color: var(--muted); padding: 0.5rem; border-radius: 6px; white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow-y: auto; border: 1px solid var(--border); }
+  .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .segmented button { padding: 0.3rem 0.55rem; font-size: 0.75rem; border: none; background: var(--bg); color: var(--fg); cursor: pointer; border-right: 1px solid var(--border); }
+  .segmented button:last-child { border-right: none; }
+  .segmented button.active { background: var(--accent); color: #fff; }
+  .chip-group { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .chip { padding: 0.2rem 0.5rem; font-size: 0.72rem; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; background: var(--bg); color: var(--fg); user-select: none; }
+  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .toggle-switch { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; font-size: 0.78rem; user-select: none; }
+  .toggle-switch .track { width: 28px; height: 16px; border-radius: 8px; background: var(--border); position: relative; transition: background 0.15s; }
+  .toggle-switch.on .track { background: var(--accent); }
+  .toggle-switch .thumb { width: 12px; height: 12px; border-radius: 50%; background: #fff; position: absolute; top: 2px; left: 2px; transition: left 0.15s; }
+  .toggle-switch.on .thumb { left: 14px; }
+  .tag-input-wrapper { display: flex; flex-wrap: wrap; gap: 0.25rem; padding: 0.35rem; border: 1px solid var(--border); border-radius: 6px; min-height: 32px; align-items: center; background: var(--bg); }
+  .tag-input-wrapper input { border: none; outline: none; font-size: 0.78rem; background: transparent; color: var(--fg); flex: 1; min-width: 80px; padding: 0; }
+  .tag { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0.15rem 0.4rem; font-size: 0.72rem; background: var(--accent-light); color: var(--accent); border-radius: 4px; }
+  .tag .remove { cursor: pointer; font-weight: bold; opacity: 0.7; }
+  .tag .remove:hover { opacity: 1; }
+  .wizard-advanced { display: none; }
+  .wizard-advanced.open { display: block; }
+  .wizard-advanced-toggle { font-size: 0.75rem; color: var(--accent); cursor: pointer; margin-top: 0.5rem; user-select: none; }
+  .wizard-preset-row { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.75rem; }
+  .wizard-preset-row select { flex: 1; padding: 0.3rem; font-size: 0.78rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  .wizard-preset-row button { padding: 0.3rem 0.5rem; font-size: 0.72rem; }
+  .config-summary { font-size: 0.75rem; color: var(--muted); margin-top: 0.3rem; }
+  .config-summary .hash { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.7rem; opacity: 0.6; }
+  @media (max-width: 600px) { .wizard-layout { flex-direction: column; } .wizard-right { width: 100%; } }
 </style>
 </head>
 <body>
@@ -291,6 +324,7 @@
 
     <div class="typing-indicator" id="typing">Generating...</div>
 
+    <div id="constraints-active-pill" style="display:none;padding:0.2rem 0.75rem;font-size:0.72rem;color:var(--accent);cursor:pointer;border-top:1px solid var(--border);" onclick="openWizard(mode==='research')"><span style="background:var(--accent-light);padding:0.15rem 0.5rem;border-radius:10px;">Constraints active</span> <span id="constraints-pill-hash" style="font-family:'SF Mono',Menlo,Consolas,monospace;font-size:0.65rem;opacity:0.5;"></span></div>
     <div class="chat-input">
       <textarea id="input" placeholder="Type a message..." rows="1" data-testid="chat-input"></textarea>
       <button class="intent-btn" onclick="openIntentForm()" data-testid="intent-form-button" title="Intent Form">&#9881;</button>
@@ -422,7 +456,7 @@
           <div class="empty">No contract defined yet.</div>
         </div>
         <div style="padding: 0 0.75rem 0.75rem;">
-          <button class="gov-btn" onclick="openModal('edit-contract-modal')" style="width:100%;font-size:0.78rem;">Edit Contract</button>
+          <button class="gov-btn" onclick="openWizard(false)" style="width:100%;font-size:0.78rem;">Edit Contract</button>
         </div>
       </div>
 
@@ -540,7 +574,7 @@
           <div class="empty">No scope defined yet.</div>
         </div>
         <div style="padding: 0 0.75rem 0.75rem;">
-          <button class="gov-btn" onclick="openModal('edit-research-scope-modal')" style="width:100%;font-size:0.78rem;">Edit Scope</button>
+          <button class="gov-btn" onclick="openWizard(true)" style="width:100%;font-size:0.78rem;">Edit Scope</button>
         </div>
       </div>
 
@@ -881,6 +915,128 @@
     <div class="buttons">
       <button class="gov-btn" onclick="closeModal('edit-research-scope-modal')">Cancel</button>
       <button class="gov-btn primary" onclick="saveResearchScope()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Constraints Wizard Modal (shared by code + research) -->
+<div class="modal-overlay" id="wizard-modal">
+  <div class="modal wizard">
+    <h3 id="wizard-title">Constraints Wizard</h3>
+    <div class="wizard-preset-row">
+      <select id="wizard-preset-select"><option value="">— load preset —</option></select>
+      <button class="gov-btn" onclick="loadWizardPreset()" style="font-size:0.72rem;">Load</button>
+      <button class="gov-btn" onclick="wizardSavePreset()" style="font-size:0.72rem;">Save</button>
+    </div>
+    <div class="wizard-layout">
+      <div class="wizard-left">
+        <div class="form-group">
+          <label>Artifact type</label>
+          <select id="wiz-artifact-type" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:0.8rem;" onchange="renderWizardPreview()"></select>
+        </div>
+        <div class="form-group">
+          <label>Length</label>
+          <div class="segmented" id="wiz-length" onclick="clickSegmented(event);renderWizardPreview()">
+            <button data-val="short">short</button>
+            <button data-val="medium" class="active">medium</button>
+            <button data-val="long">long</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Voice</label>
+          <div class="chip-group" id="wiz-voice" onclick="clickChip(event);renderWizardPreview()">
+            <span class="chip" data-val="dry">dry</span>
+            <span class="chip" data-val="neutral">neutral</span>
+            <span class="chip" data-val="wry">wry</span>
+            <span class="chip" data-val="academic">academic</span>
+            <span class="chip" data-val="spicy">spicy</span>
+            <span class="chip" data-val="tender">tender</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Personal material</label>
+          <div class="segmented" id="wiz-personal" onclick="clickSegmented(event);renderWizardPreview()">
+            <button data-val="none" class="active">none</button>
+            <button data-val="light">light</button>
+            <button data-val="heavy">heavy</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Citations</label>
+          <div class="segmented" id="wiz-citations" onclick="clickSegmented(event);renderWizardPreview()">
+            <button data-val="none">none</button>
+            <button data-val="light" class="active">light</button>
+            <button data-val="required">required</button>
+          </div>
+        </div>
+
+        <div class="wizard-advanced-toggle" onclick="this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'▾ Hide advanced':'▸ Show advanced'">▸ Show advanced</div>
+        <div class="wizard-advanced" id="wiz-advanced">
+          <div class="form-group" style="margin-top:0.5rem;">
+            <label>Structure</label>
+            <div class="chip-group" id="wiz-structure" onclick="clickChip(event);renderWizardPreview()">
+              <span class="chip" data-val="hook">hook</span>
+              <span class="chip" data-val="thesis">thesis</span>
+              <span class="chip" data-val="case_study">case study</span>
+              <span class="chip" data-val="argument">argument</span>
+              <span class="chip" data-val="counterpoint">counterpoint</span>
+              <span class="chip" data-val="principles">principles</span>
+              <span class="chip" data-val="closing">closing</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Formatting</label>
+            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
+              <span class="toggle-switch on" id="wiz-fmt-tables" onclick="toggleSwitch(this);renderWizardPreview()"><span class="track"><span class="thumb"></span></span>Tables</span>
+              <span class="toggle-switch on" id="wiz-fmt-bullets" onclick="toggleSwitch(this);renderWizardPreview()"><span class="track"><span class="thumb"></span></span>Bullets</span>
+              <span class="toggle-switch on" id="wiz-fmt-headings" onclick="toggleSwitch(this);renderWizardPreview()"><span class="track"><span class="thumb"></span></span>Headings</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Bans (type + Enter)</label>
+            <div class="tag-input-wrapper" id="wiz-bans-wrapper">
+              <input type="text" id="wiz-bans-input" placeholder="e.g. studies show" onkeydown="if(event.key==='Enter'){event.preventDefault();addBanTag();}">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Audience</label>
+            <div class="segmented" id="wiz-audience" onclick="clickSegmented(event);renderWizardPreview()">
+              <button data-val="general" class="active">general</button>
+              <button data-val="technical">technical</button>
+              <button data-val="policy">policy</button>
+              <button data-val="mixed">mixed</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Strict mode</label>
+            <span class="toggle-switch" id="wiz-strict" onclick="toggleSwitch(this);renderWizardPreview()"><span class="track"><span class="thumb"></span></span>Strict</span>
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="wiz-description" placeholder="Additional notes..." style="min-height:50px;" oninput="renderWizardPreview()"></textarea>
+          </div>
+          <div class="form-group" id="wiz-transport-group">
+            <label>Transport</label>
+            <select id="wiz-transport" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:0.8rem;" onchange="renderWizardPreview()">
+              <option value="stdio">stdio</option>
+              <option value="http">http</option>
+              <option value="file">file</option>
+            </select>
+          </div>
+          <div style="margin-top:0.5rem;font-size:0.72rem;color:var(--muted);">
+            <a href="#" onclick="event.preventDefault();wizardRawEdit();" style="color:var(--muted);">Switch to raw edit (clears wizard config)</a>
+          </div>
+        </div>
+      </div>
+      <div class="wizard-right">
+        <label style="font-size:0.75rem;font-weight:600;margin-bottom:0.3rem;display:block;">Live Preview</label>
+        <div class="wizard-preview" id="wiz-preview"></div>
+      </div>
+    </div>
+    <div class="buttons" style="margin-top:0.75rem;">
+      <button class="gov-btn" onclick="closeModal('wizard-modal')">Cancel</button>
+      <button class="gov-btn" onclick="wizardJustDraft()" style="font-size:0.78rem;">Just Draft</button>
+      <button class="gov-btn primary" onclick="wizardSaveConstraints()">Save Constraints</button>
     </div>
   </div>
 </div>
@@ -1622,12 +1778,26 @@
   var _pendingCodeBlocks = {};  // turnId -> [{code, lang}]
   var _projectState = null;
 
+  function updateConstraintsPill(contract) {
+    var pill = document.getElementById('constraints-active-pill');
+    var hashEl = document.getElementById('constraints-pill-hash');
+    if (!pill) return;
+    if (contract && contract.config && typeof contract.config === 'object') {
+      pill.style.display = 'block';
+      hashEl.textContent = contract.config_hash || '';
+    } else {
+      pill.style.display = 'none';
+    }
+  }
+
   function renderProjectState(state) {
     _projectState = state;
+    _lastCodeState = state;
     renderIntent(state.intent || {});
     renderContractCard(state.contract || {});
     renderPlan(state.plan || { phases: [] });
     renderFiles(state.files || {});
+    updateConstraintsPill(state.contract);
     var versionEl = document.getElementById('state-version-display');
     if (versionEl) versionEl.textContent = state.version || 0;
   }
@@ -1658,31 +1828,56 @@
     var transportEl = document.getElementById('contract-transport');
     transportEl.textContent = contract.transport || 'stdio';
 
-    if (!contract.description && (!contract.inputs || contract.inputs.length === 0)) {
+    var hasConfig = contract.config && typeof contract.config === 'object';
+    var hasLegacy = contract.description || (contract.inputs && contract.inputs.length > 0);
+
+    if (!hasConfig && !hasLegacy) {
       body.innerHTML = '<div class="empty">No contract defined yet.</div>';
       return;
     }
 
     var html = '';
-    if (contract.description) {
-      html += '<div style="font-size:0.8rem;margin-bottom:0.4rem;">' + esc(contract.description) + '</div>';
-    }
-    if (contract.inputs && contract.inputs.length > 0) {
-      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Inputs</div>';
-      for (var i = 0; i < contract.inputs.length; i++) {
-        var f = contract.inputs[i];
-        html += '<div class="contract-field"><span class="field-name">' + esc(f.name) + '</span> <span class="field-type">' + esc(f.type) + '</span></div>';
-      }
-    }
-    if (contract.outputs && contract.outputs.length > 0) {
-      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Outputs</div>';
-      for (var j = 0; j < contract.outputs.length; j++) {
-        var o = contract.outputs[j];
-        html += '<div class="contract-field"><span class="field-name">' + esc(o.name) + '</span> <span class="field-type">' + esc(o.type) + '</span>';
-        if (o.description) html += ' <span class="field-type">— ' + esc(o.description) + '</span>';
+
+    if (hasConfig) {
+      var cfg = contract.config;
+      html += '<div style="font-size:0.8rem;margin-bottom:0.3rem;">';
+      html += '<strong>' + esc((cfg.artifact_type || '').replace(/_/g, ' ')) + '</strong>';
+      if (cfg.length) html += ' &middot; ' + esc(cfg.length);
+      html += '</div>';
+      if (cfg.voice && cfg.voice.length) {
+        html += '<div class="chip-group" style="margin-bottom:0.3rem;">';
+        for (var v = 0; v < cfg.voice.length; v++) html += '<span class="chip active" style="cursor:default;font-size:0.68rem;">' + esc(cfg.voice[v]) + '</span>';
         html += '</div>';
       }
+      if (cfg.citations) html += '<div style="font-size:0.72rem;color:var(--muted);">Citations: ' + esc(cfg.citations) + '</div>';
+      if (cfg.bans && cfg.bans.length) {
+        html += '<div style="font-size:0.72rem;color:var(--badge-block);margin-top:0.2rem;">Bans: ' + esc(cfg.bans.join('; ')) + '</div>';
+      }
+      if (contract.config_hash) {
+        html += '<div class="config-summary"><span class="hash">' + esc(contract.config_hash) + '</span></div>';
+      }
+    } else {
+      if (contract.description) {
+        html += '<div style="font-size:0.8rem;margin-bottom:0.4rem;">' + esc(contract.description) + '</div>';
+      }
+      if (contract.inputs && contract.inputs.length > 0) {
+        html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Inputs</div>';
+        for (var i = 0; i < contract.inputs.length; i++) {
+          var f = contract.inputs[i];
+          html += '<div class="contract-field"><span class="field-name">' + esc(f.name) + '</span> <span class="field-type">' + esc(f.type) + '</span></div>';
+        }
+      }
+      if (contract.outputs && contract.outputs.length > 0) {
+        html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Outputs</div>';
+        for (var j = 0; j < contract.outputs.length; j++) {
+          var o = contract.outputs[j];
+          html += '<div class="contract-field"><span class="field-name">' + esc(o.name) + '</span> <span class="field-type">' + esc(o.type) + '</span>';
+          if (o.description) html += ' <span class="field-type">— ' + esc(o.description) + '</span>';
+          html += '</div>';
+        }
+      }
     }
+
     if (contract.constraints && contract.constraints.length > 0) {
       html += '<div style="font-size:0.75rem;font-weight:600;color:var(--badge-block);margin-top:0.3rem;">Constraints</div>';
       for (var k = 0; k < contract.constraints.length; k++) {
@@ -2410,6 +2605,398 @@
   window.openModal = function(id) { document.getElementById(id).classList.add('open'); };
   window.closeModal = function(id) { document.getElementById(id).classList.remove('open'); };
 
+  // ===== Wizard: state + helpers =====
+
+  var _wizardIsResearch = false;
+  var _wizardBans = [];
+
+  var _CODE_ARTIFACTS = ['tool','library','script','test','config','readme','design_doc','changelog'];
+  var _RESEARCH_ARTIFACTS = ['essay','thread','memo','lit_review','outline','report','bibliography'];
+  var _SET_FIELDS = ['voice','bans','structure'];
+  var _LENGTH_BANDS = { short: [0, 800], medium: [800, 2000], long: [2000, 10000] };
+
+  function clickSegmented(e) {
+    var btn = e.target.closest('[data-val]');
+    if (!btn) return;
+    var parent = btn.parentElement;
+    var siblings = parent.querySelectorAll('[data-val]');
+    for (var i = 0; i < siblings.length; i++) siblings[i].classList.remove('active');
+    btn.classList.add('active');
+  }
+
+  function getSegmentedValue(id) {
+    var el = document.getElementById(id);
+    var active = el.querySelector('.active');
+    return active ? active.getAttribute('data-val') : '';
+  }
+
+  function setSegmentedValue(id, val) {
+    var el = document.getElementById(id);
+    var btns = el.querySelectorAll('[data-val]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle('active', btns[i].getAttribute('data-val') === val);
+    }
+  }
+
+  function clickChip(e) {
+    var chip = e.target.closest('.chip');
+    if (!chip) return;
+    chip.classList.toggle('active');
+  }
+
+  function getChipValues(id) {
+    var el = document.getElementById(id);
+    var active = el.querySelectorAll('.chip.active');
+    var vals = [];
+    for (var i = 0; i < active.length; i++) vals.push(active[i].getAttribute('data-val'));
+    return vals;
+  }
+
+  function setChipValues(id, vals) {
+    var el = document.getElementById(id);
+    var chips = el.querySelectorAll('.chip');
+    var set = {};
+    for (var i = 0; i < vals.length; i++) set[vals[i]] = true;
+    for (var j = 0; j < chips.length; j++) {
+      chips[j].classList.toggle('active', !!set[chips[j].getAttribute('data-val')]);
+    }
+  }
+
+  function toggleSwitch(el) { el.classList.toggle('on'); }
+
+  function getToggle(id) { return document.getElementById(id).classList.contains('on'); }
+
+  function setToggle(id, val) { document.getElementById(id).classList.toggle('on', !!val); }
+
+  // ===== Wizard: bans tag input =====
+
+  function renderBansTags() {
+    var wrapper = document.getElementById('wiz-bans-wrapper');
+    var input = document.getElementById('wiz-bans-input');
+    // Remove old tags
+    var old = wrapper.querySelectorAll('.tag');
+    for (var i = 0; i < old.length; i++) old[i].remove();
+    // Add current
+    for (var j = 0; j < _wizardBans.length; j++) {
+      var tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.innerHTML = esc(_wizardBans[j]) + ' <span class="remove" data-idx="' + j + '">&times;</span>';
+      wrapper.insertBefore(tag, input);
+    }
+    // Bind remove
+    var removes = wrapper.querySelectorAll('.tag .remove');
+    for (var k = 0; k < removes.length; k++) {
+      removes[k].onclick = function() {
+        _wizardBans.splice(parseInt(this.getAttribute('data-idx'), 10), 1);
+        renderBansTags();
+        renderWizardPreview();
+      };
+    }
+  }
+
+  window.addBanTag = function() {
+    var input = document.getElementById('wiz-bans-input');
+    var val = input.value.trim();
+    if (_wizardBans.length >= 50) { alert('Maximum 50 bans reached.'); return; }
+    if (val && _wizardBans.indexOf(val) === -1) {
+      _wizardBans.push(val);
+      input.value = '';
+      renderBansTags();
+      renderWizardPreview();
+    }
+  };
+
+  // ===== Wizard: render + events =====
+
+  function extractWizardConfig() {
+    var config = {};
+    config.artifact_type = document.getElementById('wiz-artifact-type').value;
+    config.length = getSegmentedValue('wiz-length');
+    config.voice = getChipValues('wiz-voice');
+    config.personal_material = getSegmentedValue('wiz-personal');
+    config.citations = getSegmentedValue('wiz-citations');
+    config.structure = getChipValues('wiz-structure');
+    config.format = {
+      tables: getToggle('wiz-fmt-tables'),
+      bullets: getToggle('wiz-fmt-bullets'),
+      headings: getToggle('wiz-fmt-headings')
+    };
+    config.bans = _wizardBans.slice();
+    config.audience = getSegmentedValue('wiz-audience');
+    config.strict = getToggle('wiz-strict');
+    var desc = document.getElementById('wiz-description').value.trim();
+    if (desc) config.description = desc;
+    if (!_wizardIsResearch) config.transport = document.getElementById('wiz-transport').value;
+    return config;
+  }
+
+  function configToConstraints(config) {
+    var c = [];
+    if (config.length) {
+      var band = _LENGTH_BANDS[config.length] || [800, 2000];
+      c.push('Length: ' + config.length + ' (' + band[0] + '-' + band[1] + ' words)');
+    }
+    if (config.voice && config.voice.length) c.push('Voice: ' + config.voice.join(', '));
+    if (config.citations) c.push('Citations: ' + config.citations);
+    if (config.bans && config.bans.length) {
+      for (var i = 0; i < config.bans.length; i++) c.push('Ban: ' + config.bans[i]);
+    }
+    if (config.format) {
+      if (config.format.tables === false) c.push('No tables');
+      if (config.format.bullets === false) c.push('No bullet lists');
+      if (config.format.headings === false) c.push('No headings');
+    }
+    if (config.strict) c.push('Strict mode: on');
+    return c;
+  }
+
+  function renderWizardPreview() {
+    var config = extractWizardConfig();
+    var lines = [];
+    lines.push('[CONSTRAINTS config_hash=<computed>]');
+    if (config.artifact_type) lines.push('artifact_type: ' + config.artifact_type);
+    var band = _LENGTH_BANDS[config.length] || [800, 2000];
+    lines.push('length_band: ' + (config.length || 'medium'));
+    lines.push('length_min_words: ' + band[0]);
+    lines.push('length_max_words: ' + band[1]);
+    if (config.voice && config.voice.length) lines.push('voice: ' + config.voice.join(', '));
+    if (config.citations) lines.push('citations: ' + config.citations);
+    if (config.personal_material) lines.push('personal_material: ' + config.personal_material);
+    if (config.format) {
+      if (typeof config.format.tables === 'boolean') lines.push('format_tables: ' + config.format.tables);
+      if (typeof config.format.bullets === 'boolean') lines.push('format_bullets: ' + config.format.bullets);
+      if (typeof config.format.headings === 'boolean') lines.push('format_headings: ' + config.format.headings);
+    }
+    if (config.audience) lines.push('audience: ' + config.audience);
+    if (config.bans && config.bans.length) lines.push('bans: ' + config.bans.join('; '));
+    if (config.structure && config.structure.length) lines.push('structure: ' + config.structure.join(', '));
+    lines.push('strict: ' + (config.strict ? 'true' : 'false'));
+    lines.push('[/CONSTRAINTS]');
+    document.getElementById('wiz-preview').textContent = lines.join('\n');
+  }
+
+  function populateWizardFromConfig(config) {
+    if (!config) return;
+    if (config.artifact_type) document.getElementById('wiz-artifact-type').value = config.artifact_type;
+    if (config.length) setSegmentedValue('wiz-length', config.length);
+    if (config.voice) setChipValues('wiz-voice', config.voice);
+    if (config.personal_material) setSegmentedValue('wiz-personal', config.personal_material);
+    if (config.citations) setSegmentedValue('wiz-citations', config.citations);
+    if (config.structure) setChipValues('wiz-structure', config.structure);
+    if (config.format) {
+      if (typeof config.format.tables === 'boolean') setToggle('wiz-fmt-tables', config.format.tables);
+      if (typeof config.format.bullets === 'boolean') setToggle('wiz-fmt-bullets', config.format.bullets);
+      if (typeof config.format.headings === 'boolean') setToggle('wiz-fmt-headings', config.format.headings);
+    }
+    _wizardBans = (config.bans || []).slice();
+    renderBansTags();
+    if (config.audience) setSegmentedValue('wiz-audience', config.audience);
+    if (typeof config.strict === 'boolean') setToggle('wiz-strict', config.strict);
+    if (config.description) document.getElementById('wiz-description').value = config.description;
+    if (config.transport) document.getElementById('wiz-transport').value = config.transport;
+  }
+
+  // ===== Wizard: canonical hash (JS side) =====
+
+  function sortObjectKeys(obj) {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(sortObjectKeys);
+    var sorted = {};
+    var keys = Object.keys(obj).sort();
+    for (var i = 0; i < keys.length; i++) sorted[keys[i]] = sortObjectKeys(obj[keys[i]]);
+    return sorted;
+  }
+
+  function canonicalizeConfig(config) {
+    var result = sortObjectKeys(config);
+    // Trim strings recursively
+    result = JSON.parse(JSON.stringify(result, function(k, v) { return typeof v === 'string' ? v.trim() : v; }));
+    // Sort known-set lists
+    for (var i = 0; i < _SET_FIELDS.length; i++) {
+      var key = _SET_FIELDS[i];
+      if (result[key] && Array.isArray(result[key])) result[key] = result[key].slice().sort();
+    }
+    return result;
+  }
+
+  // Cross-language hash test vector (must match Python test_compute_config_hash_known_vector):
+  //   Input (any key order): {"artifact_type":"essay","bans":["studies show","experts agree"],"length":"medium","voice":["wry","dry"]}
+  //   Canonical JSON:         {"artifact_type":"essay","bans":["experts agree","studies show"],"length":"medium","voice":["dry","wry"]}
+  //   SHA-256 full:           a5e80158a5636c553943b23fb8559db9f1f0cf250a8d5f6bb914afe720be1cc8
+  //   Short (16 hex):         a5e80158a5636c55
+  async function computeConfigHash(config) {
+    var canonical = JSON.stringify(canonicalizeConfig(config));
+    try {
+      var buf = new TextEncoder().encode(canonical);
+      var hashBuf = await crypto.subtle.digest('SHA-256', buf);
+      var hex = Array.from(new Uint8Array(hashBuf)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+      return { short: hex.slice(0, 16), full: hex };
+    } catch (e) {
+      return { short: null, full: null };
+    }
+  }
+
+  // ===== Wizard: open / save / presets =====
+
+  window.openWizard = function(isResearch) {
+    _wizardIsResearch = isResearch;
+    var title = isResearch ? 'Scope Wizard' : 'Contract Wizard';
+    document.getElementById('wizard-title').textContent = title;
+
+    // Populate artifact type dropdown
+    var sel = document.getElementById('wiz-artifact-type');
+    var artifacts = isResearch ? _RESEARCH_ARTIFACTS : _CODE_ARTIFACTS;
+    sel.innerHTML = '';
+    for (var i = 0; i < artifacts.length; i++) {
+      var opt = document.createElement('option');
+      opt.value = artifacts[i];
+      opt.textContent = artifacts[i].replace(/_/g, ' ');
+      sel.appendChild(opt);
+    }
+
+    // Show/hide transport (code only)
+    document.getElementById('wiz-transport-group').style.display = isResearch ? 'none' : 'block';
+
+    // Reset state
+    setSegmentedValue('wiz-length', 'medium');
+    setChipValues('wiz-voice', []);
+    setSegmentedValue('wiz-personal', 'none');
+    setSegmentedValue('wiz-citations', 'light');
+    setChipValues('wiz-structure', []);
+    setToggle('wiz-fmt-tables', true);
+    setToggle('wiz-fmt-bullets', true);
+    setToggle('wiz-fmt-headings', true);
+    _wizardBans = [];
+    renderBansTags();
+    setSegmentedValue('wiz-audience', 'general');
+    setToggle('wiz-strict', false);
+    document.getElementById('wiz-description').value = '';
+    document.getElementById('wiz-transport').value = 'stdio';
+
+    // Load existing config if present
+    try {
+      var state;
+      if (isResearch) {
+        state = _lastResearchState;
+      } else {
+        state = _lastCodeState;
+      }
+      if (state && state.contract && state.contract.config) {
+        populateWizardFromConfig(state.contract.config);
+      }
+    } catch (e) {}
+
+    refreshPresetDropdown();
+    renderWizardPreview();
+    openModal('wizard-modal');
+  };
+
+  window.wizardJustDraft = function() {
+    closeModal('wizard-modal');
+  };
+
+  window.wizardSaveConstraints = async function() {
+    var config = extractWizardConfig();
+    var hash = await computeConfigHash(config);
+    var constraints = configToConstraints(config);
+    var desc = config.description || '';
+    var transport = config.transport || (_wizardIsResearch ? 'text' : 'stdio');
+
+    var url, versionFn, bumpFn;
+    if (_wizardIsResearch) {
+      url = BASE + '/governor/research/project/contract';
+      versionFn = _researchStateVersion;
+      bumpFn = _bumpResearchVersion;
+    } else {
+      url = BASE + '/governor/code/project/contract';
+      versionFn = _stateVersion;
+      bumpFn = _bumpVersion;
+    }
+
+    var body = {
+      description: desc,
+      inputs: [],
+      outputs: [],
+      constraints: constraints,
+      transport: transport,
+      expected_version: versionFn(),
+      config: config,
+      config_hash: hash.short,
+      config_hash_full: hash.full
+    };
+
+    try {
+      var handleFn = _wizardIsResearch ? _handleResearchVersionedResponse : _handleVersionedResponse;
+      var r = await fetch(url, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      await handleFn(r);
+      bumpFn();
+      closeModal('wizard-modal');
+      refreshGovernor();
+    } catch (err) {
+      if (err.message !== 'stale') alert('Could not save: ' + err.message);
+    }
+  };
+
+  window.wizardRawEdit = function() {
+    if (!confirm('Switching to manual mode clears the wizard config. Continue?')) return;
+    closeModal('wizard-modal');
+    if (_wizardIsResearch) {
+      openModal('edit-research-scope-modal');
+    } else {
+      openModal('edit-contract-modal');
+    }
+  };
+
+  // ===== Wizard: presets =====
+
+  function _presetKey() {
+    return 'wizard_presets_v1_' + (_wizardIsResearch ? 'research' : 'code');
+  }
+
+  function _loadPresets() {
+    try { return JSON.parse(localStorage.getItem(_presetKey()) || '{}'); } catch (e) { return {}; }
+  }
+
+  function refreshPresetDropdown() {
+    var sel = document.getElementById('wizard-preset-select');
+    var presets = _loadPresets();
+    sel.innerHTML = '<option value="">— load preset —</option>';
+    var names = Object.keys(presets).sort();
+    for (var i = 0; i < names.length; i++) {
+      var opt = document.createElement('option');
+      opt.value = names[i];
+      opt.textContent = names[i];
+      sel.appendChild(opt);
+    }
+  }
+
+  window.loadWizardPreset = function() {
+    var name = document.getElementById('wizard-preset-select').value;
+    if (!name) return;
+    var presets = _loadPresets();
+    if (presets[name]) {
+      populateWizardFromConfig(presets[name]);
+      renderWizardPreview();
+    }
+  };
+
+  window.wizardSavePreset = function() {
+    var name = prompt('Preset name:');
+    if (!name) return;
+    var config = extractWizardConfig();
+    var presets = _loadPresets();
+    presets[name] = config;
+    localStorage.setItem(_presetKey(), JSON.stringify(presets));
+    refreshPresetDropdown();
+  };
+
+  // Cache last state for wizard population
+  var _lastCodeState = null;
+  var _lastResearchState = null;
+
   // ========== Intent Form ==========
   var _intentSchema = null;
   var _intentTemplates = [];
@@ -3044,10 +3631,12 @@
 
   function renderResearchProjectState(state) {
     _researchProjectState = state;
+    _lastResearchState = state;
     renderResearchIntent(state.intent || {});
     renderResearchScope(state.contract || {});
     renderResearchPlan(state.plan || { phases: [] });
     renderResearchFiles(state.files || {});
+    updateConstraintsPill(state.contract);
     var vEl = document.getElementById('research-state-version-display');
     if (vEl) vEl.textContent = state.version || 0;
   }
@@ -3074,30 +3663,56 @@
 
   function renderResearchScope(contract) {
     var body = document.getElementById('research-contract-body');
-    if (!contract.description && (!contract.inputs || contract.inputs.length === 0)) {
+    var hasConfig = contract.config && typeof contract.config === 'object';
+    var hasLegacy = contract.description || (contract.inputs && contract.inputs.length > 0);
+
+    if (!hasConfig && !hasLegacy) {
       body.innerHTML = '<div class="empty">No scope defined yet.</div>';
       return;
     }
+
     var html = '';
-    if (contract.description) {
-      html += '<div style="font-size:0.8rem;margin-bottom:0.4rem;">' + esc(contract.description) + '</div>';
-    }
-    if (contract.inputs && contract.inputs.length > 0) {
-      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Sources</div>';
-      for (var i = 0; i < contract.inputs.length; i++) {
-        var f = contract.inputs[i];
-        html += '<div class="contract-field"><span class="field-name">' + esc(f.name) + '</span> <span class="field-type">' + esc(f.type) + '</span></div>';
-      }
-    }
-    if (contract.outputs && contract.outputs.length > 0) {
-      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Deliverables</div>';
-      for (var j = 0; j < contract.outputs.length; j++) {
-        var o = contract.outputs[j];
-        html += '<div class="contract-field"><span class="field-name">' + esc(o.name) + '</span> <span class="field-type">' + esc(o.type) + '</span>';
-        if (o.description) html += ' <span class="field-type">\u2014 ' + esc(o.description) + '</span>';
+
+    if (hasConfig) {
+      var cfg = contract.config;
+      html += '<div style="font-size:0.8rem;margin-bottom:0.3rem;">';
+      html += '<strong>' + esc((cfg.artifact_type || '').replace(/_/g, ' ')) + '</strong>';
+      if (cfg.length) html += ' &middot; ' + esc(cfg.length);
+      html += '</div>';
+      if (cfg.voice && cfg.voice.length) {
+        html += '<div class="chip-group" style="margin-bottom:0.3rem;">';
+        for (var v = 0; v < cfg.voice.length; v++) html += '<span class="chip active" style="cursor:default;font-size:0.68rem;">' + esc(cfg.voice[v]) + '</span>';
         html += '</div>';
       }
+      if (cfg.citations) html += '<div style="font-size:0.72rem;color:var(--muted);">Citations: ' + esc(cfg.citations) + '</div>';
+      if (cfg.bans && cfg.bans.length) {
+        html += '<div style="font-size:0.72rem;color:var(--badge-block);margin-top:0.2rem;">Bans: ' + esc(cfg.bans.join('; ')) + '</div>';
+      }
+      if (contract.config_hash) {
+        html += '<div class="config-summary"><span class="hash">' + esc(contract.config_hash) + '</span></div>';
+      }
+    } else {
+      if (contract.description) {
+        html += '<div style="font-size:0.8rem;margin-bottom:0.4rem;">' + esc(contract.description) + '</div>';
+      }
+      if (contract.inputs && contract.inputs.length > 0) {
+        html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Sources</div>';
+        for (var i = 0; i < contract.inputs.length; i++) {
+          var f = contract.inputs[i];
+          html += '<div class="contract-field"><span class="field-name">' + esc(f.name) + '</span> <span class="field-type">' + esc(f.type) + '</span></div>';
+        }
+      }
+      if (contract.outputs && contract.outputs.length > 0) {
+        html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Deliverables</div>';
+        for (var j = 0; j < contract.outputs.length; j++) {
+          var o = contract.outputs[j];
+          html += '<div class="contract-field"><span class="field-name">' + esc(o.name) + '</span> <span class="field-type">' + esc(o.type) + '</span>';
+          if (o.description) html += ' <span class="field-type">\u2014 ' + esc(o.description) + '</span>';
+          html += '</div>';
+        }
+      }
     }
+
     if (contract.constraints && contract.constraints.length > 0) {
       html += '<div style="font-size:0.75rem;font-weight:600;color:var(--badge-block);margin-top:0.3rem;">Constraints</div>';
       for (var k = 0; k < contract.constraints.length; k++) {

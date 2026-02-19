@@ -95,7 +95,7 @@ _current_backend_type: str = BACKEND_TYPE
 app = FastAPI(
     title="Governor Chat Adapter",
     description="OpenAI-compatible API with switchable backends and Governor integration",
-    version="0.3.0",
+    version="0.4.0",
 )
 
 app.add_middleware(
@@ -409,6 +409,88 @@ async def switch_backend(request: BackendSwitchRequest) -> dict[str, Any]:
     }
 
 
+_LENGTH_BANDS = {
+    "short": (0, 800),
+    "medium": (800, 2000),
+    "long": (2000, 10000),
+}
+
+
+def _build_constraints_message() -> dict[str, str] | None:
+    """Build a system message from the active project's config constraints.
+
+    Returns a {"role": "system", "content": ...} dict, or None if nothing to inject.
+    Only applies in code or research modes.
+    """
+    mode = GOVERNOR_MODE
+    if mode not in ("code", "research"):
+        return None
+
+    try:
+        store = _get_project_store() if mode == "code" else _get_research_project_store()
+        state = store.get_state()
+        contract = state.get("contract", {})
+    except Exception:
+        return None
+
+    config = contract.get("config")
+    if config:
+        # Build typed constraints block from config
+        lines = []
+        hash_tag = contract.get("config_hash", "")
+        lines.append(f"[CONSTRAINTS config_hash={hash_tag}]")
+
+        if config.get("artifact_type"):
+            lines.append(f"artifact_type: {config['artifact_type']}")
+
+        length = config.get("length", "medium")
+        lo, hi = _LENGTH_BANDS.get(length, (800, 2000))
+        lines.append(f"length_band: {length}")
+        lines.append(f"length_min_words: {lo}")
+        lines.append(f"length_max_words: {hi}")
+
+        if config.get("voice"):
+            v = config["voice"]
+            lines.append(f"voice: {', '.join(v) if isinstance(v, list) else v}")
+
+        if config.get("citations"):
+            lines.append(f"citations: {config['citations']}")
+
+        if config.get("personal_material"):
+            lines.append(f"personal_material: {config['personal_material']}")
+
+        fmt = config.get("format", {})
+        if isinstance(fmt, dict):
+            for key in ("tables", "bullets", "headings"):
+                if key in fmt:
+                    lines.append(f"format_{key}: {str(fmt[key]).lower()}")
+
+        if config.get("audience"):
+            lines.append(f"audience: {config['audience']}")
+
+        if config.get("bans"):
+            bans = config["bans"]
+            lines.append(f"bans: {'; '.join(bans) if isinstance(bans, list) else bans}")
+
+        if config.get("structure"):
+            s = config["structure"]
+            lines.append(f"structure: {', '.join(s) if isinstance(s, list) else s}")
+
+        strict = config.get("strict", False)
+        lines.append(f"strict: {str(strict).lower()}")
+
+        lines.append("[/CONSTRAINTS]")
+        return {"role": "system", "content": "\n".join(lines)}
+
+    # Fallback: raw constraints list
+    constraints = contract.get("constraints", [])
+    if constraints:
+        block = "[CONSTRAINTS]\n" + "\n".join(constraints) + "\n[/CONSTRAINTS]"
+        return {"role": "system", "content": block}
+
+    return None
+
+
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(
     request: ChatCompletionRequest,
@@ -420,6 +502,15 @@ async def chat_completions(
     """
     client = _get_daemon_client()
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
+
+    # Inject constraints after last system message
+    constraints_msg = _build_constraints_message()
+    if constraints_msg:
+        insert_idx = 0
+        for i, m in enumerate(messages):
+            if m["role"] == "system":
+                insert_idx = i + 1
+        messages.insert(insert_idx, constraints_msg)
 
     if request.stream:
         return StreamingResponse(
@@ -1078,6 +1169,9 @@ class ContractUpdateRequest(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     transport: str = "stdio"
     expected_version: int | None = None
+    config: dict | None = None
+    config_hash: str | None = None
+    config_hash_full: str | None = None
 
 
 class PlanItemRequest(BaseModel):
@@ -1684,17 +1778,36 @@ async def code_update_intent(request: IntentUpdateRequest) -> dict[str, Any]:
 @app.put("/governor/code/project/contract")
 async def code_update_contract(request: ContractUpdateRequest) -> dict[str, Any]:
     """Update contract fields."""
-    from gov_webui.project_store import Contract, ContractField, StaleVersionError
+    from gov_webui.project_store import Contract, ContractField, StaleVersionError, compute_config_hash
 
     # Parse input/output dicts into ContractField objects
     inputs = [ContractField(**f) for f in request.inputs]
     outputs = [ContractField(**f) for f in request.outputs]
+
+    # Server always recomputes hash — never trust client hashes
+    config = request.config
+    config_hash = None
+    config_hash_full = None
+    if config:
+        # Guard against oversized configs (50KB soft cap)
+        config_size = len(json.dumps(config))
+        if config_size > 50_000:
+            raise HTTPException(400, f"Config too large: {config_size} bytes (max 50000)")
+        short, full = compute_config_hash(config)
+        if request.config_hash and request.config_hash != short:
+            raise HTTPException(400, f"Config hash mismatch: got {request.config_hash}, expected {short}")
+        config_hash = short
+        config_hash_full = full
+
     contract = Contract(
         description=request.description,
         inputs=inputs,
         outputs=outputs,
         constraints=request.constraints,
         transport=request.transport,
+        config=config,
+        config_hash=config_hash,
+        config_hash_full=config_hash_full,
     )
     store = _get_project_store()
     try:
@@ -2293,16 +2406,35 @@ async def research_update_intent(request: IntentUpdateRequest) -> dict[str, Any]
 @app.put("/governor/research/project/contract")
 async def research_update_contract(request: ContractUpdateRequest) -> dict[str, Any]:
     """Update research scope / methodology."""
-    from gov_webui.project_store import Contract, ContractField, StaleVersionError
+    from gov_webui.project_store import Contract, ContractField, StaleVersionError, compute_config_hash
 
     inputs = [ContractField(**f) for f in request.inputs]
     outputs = [ContractField(**f) for f in request.outputs]
+
+    # Server always recomputes hash — never trust client hashes
+    config = request.config
+    config_hash = None
+    config_hash_full = None
+    if config:
+        # Guard against oversized configs (50KB soft cap)
+        config_size = len(json.dumps(config))
+        if config_size > 50_000:
+            raise HTTPException(400, f"Config too large: {config_size} bytes (max 50000)")
+        short, full = compute_config_hash(config)
+        if request.config_hash and request.config_hash != short:
+            raise HTTPException(400, f"Config hash mismatch: got {request.config_hash}, expected {short}")
+        config_hash = short
+        config_hash_full = full
+
     contract = Contract(
         description=request.description,
         inputs=inputs,
         outputs=outputs,
         constraints=request.constraints,
         transport=request.transport,
+        config=config,
+        config_hash=config_hash,
+        config_hash_full=config_hash_full,
     )
     store = _get_research_project_store()
     try:
@@ -2469,10 +2601,13 @@ async def research_validate(request: RunRequest) -> dict[str, Any]:
     except Exception:
         pass  # Research store may not be initialized — that's fine
 
-    # 2. Check for common citation patterns
+    # 2. Check for common citation patterns + config bans
     import re
-    # Unreferenced claims: sentences with "studies show" / "research suggests"
-    # without any citation marker
+
+    contract = state.get("contract", {})
+    config = contract.get("config")
+
+    # Build weasel patterns: default set + config bans
     weasel_patterns = [
         r"studies\s+show",
         r"research\s+suggests",
@@ -2481,9 +2616,19 @@ async def research_validate(request: RunRequest) -> dict[str, Any]:
         r"it\s+is\s+well\s+known",
         r"evidence\s+suggests",
     ]
+
+    # Config bans feed the weasel validator as literal (case-insensitive) matches
+    ban_literals: list[str] = []
+    if config and config.get("bans"):
+        for ban in config["bans"]:
+            ban_stripped = ban.strip()
+            if ban_stripped:
+                ban_literals.append(ban_stripped.lower())
+
     lines = draft_content.split("\n")
     for i, line in enumerate(lines):
         line_lower = line.lower()
+        # Check regex weasel patterns
         for pattern in weasel_patterns:
             if re.search(pattern, line_lower):
                 # Check if line has a citation marker [N] or (Author, YYYY)
@@ -2492,18 +2637,56 @@ async def research_validate(request: RunRequest) -> dict[str, Any]:
                         f"Line {i + 1}: \"{pattern}\" without citation — "
                         f"\"{line.strip()[:60]}{'...' if len(line.strip()) > 60 else ''}\""
                     )
+        # Check literal ban matches
+        for ban in ban_literals:
+            if ban in line_lower:
+                findings.append(
+                    f"Line {i + 1}: banned phrase \"{ban}\" — "
+                    f"\"{line.strip()[:60]}{'...' if len(line.strip()) > 60 else ''}\""
+                )
 
-    # 3. Check for constraint violations from research scope
-    contract = state.get("contract", {})
+    # 3. Config-aware typed checks
+    if config:
+        # Table format check: config.format.tables == false
+        fmt = config.get("format", {})
+        if isinstance(fmt, dict) and fmt.get("tables") is False:
+            # Detect markdown tables: header row + |---| separator row
+            for i, line in enumerate(lines):
+                if i + 1 < len(lines) and re.search(r"\|.*\|", line):
+                    next_line = lines[i + 1]
+                    if re.search(r"\|[\s-]+\|", next_line):
+                        findings.append(
+                            f"Line {i + 1}: markdown table found but tables are disabled"
+                        )
+
+        # Length band check
+        length_band = config.get("length")
+        if length_band and length_band in _LENGTH_BANDS:
+            lo, hi = _LENGTH_BANDS[length_band]
+            word_count = len(draft_content.split())
+            if word_count < lo:
+                findings.append(
+                    f"Word count {word_count} below minimum {lo} for '{length_band}' band"
+                )
+            elif word_count > hi:
+                findings.append(
+                    f"Word count {word_count} above maximum {hi} for '{length_band}' band"
+                )
+
+        # Citations-required check (warn only)
+        if config.get("citations") == "required":
+            if not re.search(r"\[\d+\]|\([A-Z]\w+,?\s*\d{4}\)", draft_content):
+                findings.append(
+                    "Citations required but no citation markers found"
+                )
+
+    # 4. Check for constraint violations from research scope
     constraints = contract.get("constraints", [])
     draft_lower = draft_content.lower()
     constraint_hits: list[str] = []
     for constraint in constraints:
-        # Simple text match
         c_lower = constraint.lower()
-        # Check if the constraint describes something to avoid
         if any(neg in c_lower for neg in ["no ", "avoid ", "don't ", "never "]):
-            # Extract the key term after the negation
             for neg in ["no ", "avoid ", "don't ", "never "]:
                 if c_lower.startswith(neg):
                     term = c_lower[len(neg):].strip().rstrip(".")
@@ -2515,9 +2698,18 @@ async def research_validate(request: RunRequest) -> dict[str, Any]:
 
     findings.extend(constraint_hits)
 
+    # 5. Strict mode: when strict=true, all findings are hard fails
+    strict = config.get("strict", False) if config else False
+    success = len(findings) == 0 if strict else (
+        len([f for f in findings if "banned phrase" in f or "constraint" in f.lower()]) == 0
+        if not strict and findings else len(findings) == 0
+    )
+    # Simplify: strict=true means any finding fails, strict=false means success unless findings
+    success = len(findings) == 0
+
     return {
-        "success": len(findings) == 0,
-        "returncode": 0 if len(findings) == 0 else 1,
+        "success": success,
+        "returncode": 0 if success else 1,
         "stdout": f"Validated {request.filepath}: "
                   + (f"{len(findings)} finding(s)" if findings else "no issues found"),
         "stderr": "\n".join(findings) if findings else "",
@@ -2761,7 +2953,7 @@ async def api_info() -> dict[str, Any]:
     """JSON endpoint with API info and available endpoints."""
     return {
         "name": "Governor Chat Adapter",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "backend": _current_backend_type,
         "openai_compatible": True,
         "governor_context": GOVERNOR_CONTEXT_ID,

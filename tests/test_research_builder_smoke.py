@@ -90,7 +90,7 @@ class TestResearchBuilderSmokeLoop:
         assert r.json()["intent"]["locked"] is True
         v += 1
 
-        # 4. Set scope (contract)
+        # 4. Set scope (contract) with wizard config
         r = c.put("/governor/research/project/contract", json={
             "description": "Literature review of cognitive load in code review",
             "inputs": [{"name": "search_terms", "type": "str"}],
@@ -98,11 +98,24 @@ class TestResearchBuilderSmokeLoop:
             "constraints": ["No anecdotal evidence", "Avoid speculation"],
             "transport": "stdio",
             "expected_version": v,
+            "config": {
+                "artifact_type": "lit_review",
+                "length": "short",
+                "voice": ["academic"],
+                "citations": "light",
+                "bans": [],
+                "strict": False,
+            },
         })
         assert r.status_code == 200
         scope = r.json()["contract"]
         assert scope["description"] == "Literature review of cognitive load in code review"
         assert scope["constraints"] == ["No anecdotal evidence", "Avoid speculation"]
+        assert scope["config"]["artifact_type"] == "lit_review"
+        assert scope["config_hash"] is not None
+        assert len(scope["config_hash"]) == 16
+        assert scope["config_hash_full"] is not None
+        assert scope["config_hash_full"].startswith(scope["config_hash"])
         v += 1
 
         # 5. Create plan phases and items
@@ -376,3 +389,61 @@ class TestResearchBuilderSmokeLoop:
         })
         assert r.status_code == 400
         assert "incomplete" in r.json()["detail"].lower()
+
+    def test_bans_feed_validator(self, research_client) -> None:
+        """Config bans are caught by the validator as literal matches."""
+        c = research_client
+
+        state = c.get("/governor/research/project").json()
+        v = state["version"]
+
+        # Set scope with config bans
+        c.put("/governor/research/project/contract", json={
+            "description": "Test",
+            "inputs": [],
+            "outputs": [],
+            "constraints": [],
+            "transport": "stdio",
+            "expected_version": v,
+            "config": {
+                "artifact_type": "essay",
+                "length": "medium",
+                "bans": ["inspirational closer", "in conclusion"],
+                "strict": False,
+            },
+        })
+
+        # Accept draft containing banned phrase
+        c.put("/governor/research/project/files/draft.md", json={
+            "content": "# Analysis\n\nThis is a solid analysis.\n\n"
+                       "In conclusion, everything worked out.\n",
+        })
+
+        r = c.post("/governor/research/project/validate", json={
+            "filepath": "draft.md",
+        })
+        assert r.status_code == 200
+        val = r.json()
+        assert val["success"] is False
+        findings_text = "\n".join(val["findings"])
+        assert "in conclusion" in findings_text.lower()
+
+    def test_config_hash_mismatch_rejected(self, research_client) -> None:
+        """Server rejects mismatched client config hashes."""
+        c = research_client
+
+        state = c.get("/governor/research/project").json()
+        v = state["version"]
+
+        r = c.put("/governor/research/project/contract", json={
+            "description": "Test",
+            "inputs": [],
+            "outputs": [],
+            "constraints": [],
+            "transport": "stdio",
+            "expected_version": v,
+            "config": {"artifact_type": "essay", "length": "short"},
+            "config_hash": "deadbeefdeadbeef",  # wrong hash
+        })
+        assert r.status_code == 400
+        assert "mismatch" in r.json()["detail"].lower()
