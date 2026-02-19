@@ -39,6 +39,7 @@ def reset_adapter_globals() -> None:
     adapter_mod._context_manager = None
     adapter_mod._session_store = None
     adapter_mod._daemon_client = None
+    adapter_mod._project_store = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
     adapter_mod._pending_research_captures.clear()
@@ -48,6 +49,7 @@ def reset_adapter_globals() -> None:
     adapter_mod._context_manager = None
     adapter_mod._session_store = None
     adapter_mod._daemon_client = None
+    adapter_mod._project_store = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
     adapter_mod._pending_research_captures.clear()
@@ -2310,3 +2312,303 @@ class TestInitializedFictionCRUD:
         forbidden = resp.json()["forbidden"]
         assert len(forbidden) == 1
         assert forbidden[0]["description"] == "Time travel"
+
+
+# ============================================================================
+# Code Builder Integration Tests
+# ============================================================================
+
+
+class TestCodeBuilderProject:
+    """Integration tests for code builder project endpoints."""
+
+    def _init_code_context(self, tmp_contexts_dir):
+        """Helper: create a code-mode context and wire up the adapter."""
+        import gov_webui.adapter as adapter_mod
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+        adapter_mod._project_store = None  # force re-init
+
+    def test_get_project_empty(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        resp = client.get("/governor/code/project")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["intent"]["text"] == ""
+        assert data["plan"]["phases"] == []
+        assert data["files"] == {}
+
+    def test_put_intent(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        resp = client.put("/governor/code/project/intent", json={
+            "text": "Parse CSV files", "locked": False
+        })
+        assert resp.status_code == 200
+        assert resp.json()["intent"]["text"] == "Parse CSV files"
+
+        # Verify via GET
+        state = client.get("/governor/code/project").json()
+        assert state["intent"]["text"] == "Parse CSV files"
+
+    def test_put_intent_lock(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        resp = client.put("/governor/code/project/intent", json={
+            "text": "Locked intent", "locked": True
+        })
+        assert resp.json()["intent"]["locked"] is True
+
+    def test_put_contract(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        resp = client.put("/governor/code/project/contract", json={
+            "description": "CSV parser",
+            "inputs": [{"name": "filepath", "type": "str"}],
+            "outputs": [{"name": "rows", "type": "list"}],
+            "constraints": ["No pandas"],
+            "transport": "stdio"
+        })
+        assert resp.status_code == 200
+        contract = resp.json()["contract"]
+        assert contract["description"] == "CSV parser"
+        assert len(contract["inputs"]) == 1
+        assert contract["constraints"] == ["No pandas"]
+
+    def test_stale_version_409(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        # Get initial version
+        state = client.get("/governor/code/project").json()
+        v = state["version"]
+
+        # Update once (bumps version)
+        client.put("/governor/code/project/intent", json={
+            "text": "first", "locked": False
+        })
+
+        # Try with stale version
+        resp = client.put("/governor/code/project/intent", json={
+            "text": "second", "locked": False, "expected_version": v
+        })
+        assert resp.status_code == 409
+
+
+class TestCodeBuilderPlan:
+    """Integration tests for plan CRUD + state machine."""
+
+    def _init_code_context(self, tmp_contexts_dir):
+        import gov_webui.adapter as adapter_mod
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+        adapter_mod._project_store = None
+
+    def test_add_phase_and_item(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        resp = client.post("/governor/code/plan/phase", json={"name": "Build"})
+        assert resp.status_code == 200
+
+        resp = client.post("/governor/code/plan/item", json={
+            "phase_idx": 0, "text": "Write parser"
+        })
+        assert resp.status_code == 200
+        assert resp.json()["item"]["id"] == "p0-0"
+
+    def test_item_status_transitions(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.post("/governor/code/plan/phase", json={"name": "Phase 1"})
+        client.post("/governor/code/plan/item", json={"phase_idx": 0, "text": "Task A"})
+
+        # proposed -> accepted -> in_progress -> completed
+        for status in ["accepted", "in_progress", "completed"]:
+            resp = client.patch("/governor/code/plan/item/p0-0", json={"status": status})
+            assert resp.status_code == 200
+            assert resp.json()["item"]["status"] == status
+
+    def test_invalid_transition_400(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.post("/governor/code/plan/phase", json={"name": "Phase 1"})
+        client.post("/governor/code/plan/item", json={"phase_idx": 0, "text": "Task A"})
+
+        # proposed -> completed (skip accepted)
+        resp = client.patch("/governor/code/plan/item/p0-0", json={"status": "completed"})
+        assert resp.status_code == 400
+
+    def test_phase_gating(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.post("/governor/code/plan/phase", json={"name": "Phase 1"})
+        client.post("/governor/code/plan/phase", json={"name": "Phase 2"})
+        client.post("/governor/code/plan/item", json={"phase_idx": 0, "text": "P1 task"})
+        client.post("/governor/code/plan/item", json={"phase_idx": 1, "text": "P2 task"})
+
+        # Try to advance phase 2 item before phase 1 is complete
+        resp = client.patch("/governor/code/plan/item/p1-0", json={"status": "accepted"})
+        assert resp.status_code == 400
+        assert "incomplete" in resp.json()["detail"]
+
+    def test_update_phase(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.post("/governor/code/plan/phase", json={"name": "Old"})
+
+        resp = client.patch("/governor/code/plan/phase/0", json={"name": "New"})
+        assert resp.status_code == 200
+        assert resp.json()["phase"]["name"] == "New"
+
+
+class TestCodeBuilderFiles:
+    """Integration tests for file accept + version + hash."""
+
+    def _init_code_context(self, tmp_contexts_dir):
+        import gov_webui.adapter as adapter_mod
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+        adapter_mod._project_store = None
+
+    def test_put_and_get_file(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        resp = client.put("/governor/code/files/tool.py", json={
+            "content": "print('hello')\n", "turn_id": "turn-abc123"
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["version"] == 1
+        assert data["content_hash"]
+
+        resp = client.get("/governor/code/files/tool.py")
+        assert resp.status_code == 200
+        assert resp.json()["content"] == "print('hello')\n"
+
+    def test_file_versioning(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        r1 = client.put("/governor/code/files/tool.py", json={"content": "v1"})
+        assert r1.json()["version"] == 1
+        r2 = client.put("/governor/code/files/tool.py", json={"content": "v2"})
+        assert r2.json()["version"] == 2
+
+    def test_file_prev(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.put("/governor/code/files/tool.py", json={"content": "v1"})
+        client.put("/governor/code/files/tool.py", json={"content": "v2"})
+
+        resp = client.get("/governor/code/file-prev/tool.py")
+        assert resp.status_code == 200
+        assert resp.json()["content"] == "v1"
+
+    def test_list_files(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.put("/governor/code/files/tool.py", json={"content": "code"})
+        client.put("/governor/code/files/test_tool.py", json={"content": "tests"})
+
+        resp = client.get("/governor/code/files")
+        files = resp.json()["files"]
+        assert "tool.py" in files
+        assert "test_tool.py" in files
+
+    def test_path_safety_rejects_traversal(self, client, tmp_contexts_dir) -> None:
+        """Path traversal is tested at the store layer; HTTP layer may normalize.
+        Test the store directly for completeness."""
+        self._init_code_context(tmp_contexts_dir)
+        import gov_webui.adapter as adapter_mod
+        store = adapter_mod._get_project_store()
+        with pytest.raises(ValueError, match="traversal"):
+            store.put_file("../escape.py", "nope")
+
+    def test_path_safety_rejects_bad_extension(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        resp = client.put("/governor/code/files/script.sh", json={
+            "content": "#!/bin/bash"
+        })
+        assert resp.status_code == 400
+
+    def test_file_not_found(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        resp = client.get("/governor/code/files/nonexistent.py")
+        assert resp.status_code == 404
+
+
+class TestCodeBuilderRun:
+    """Integration tests for the run endpoint."""
+
+    def _init_code_context(self, tmp_contexts_dir):
+        import gov_webui.adapter as adapter_mod
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="code")
+        adapter_mod._context_manager = cm
+        adapter_mod._project_store = None
+
+    def test_run_success(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.put("/governor/code/files/tool.py", json={
+            "content": "print('hello world')"
+        })
+
+        resp = client.post("/governor/code/run", json={"filepath": "tool.py"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["returncode"] == 0
+        assert "hello world" in data["stdout"]
+
+    def test_run_failure(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.put("/governor/code/files/tool.py", json={
+            "content": "raise ValueError('boom')"
+        })
+
+        resp = client.post("/governor/code/run", json={"filepath": "tool.py"})
+        data = resp.json()
+        assert data["success"] is False
+        assert data["returncode"] != 0
+        assert "boom" in data["stderr"]
+
+    def test_run_timeout(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.put("/governor/code/files/tool.py", json={
+            "content": "import time; time.sleep(10)"
+        })
+
+        resp = client.post("/governor/code/run", json={
+            "filepath": "tool.py", "timeout": 1
+        })
+        data = resp.json()
+        assert data["success"] is False
+        assert "timeout" in data["stderr"].lower()
+
+    def test_run_no_files(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        resp = client.post("/governor/code/run", json={"filepath": "tool.py"})
+        assert resp.status_code == 400
+
+    def test_run_missing_entrypoint(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.put("/governor/code/files/other.py", json={"content": "pass"})
+
+        resp = client.post("/governor/code/run", json={"filepath": "tool.py"})
+        assert resp.status_code == 404
+
+    def test_run_multifile(self, client, tmp_contexts_dir) -> None:
+        """File A imports file B — both should be available in tempdir."""
+        self._init_code_context(tmp_contexts_dir)
+        client.put("/governor/code/files/helper.py", json={
+            "content": "def greet():\n    return 'hi from helper'"
+        })
+        client.put("/governor/code/files/tool.py", json={
+            "content": "from helper import greet\nprint(greet())"
+        })
+
+        resp = client.post("/governor/code/run", json={"filepath": "tool.py"})
+        data = resp.json()
+        assert data["success"] is True
+        assert "hi from helper" in data["stdout"]
+
+    def test_run_with_stdin(self, client, tmp_contexts_dir) -> None:
+        self._init_code_context(tmp_contexts_dir)
+        client.put("/governor/code/files/tool.py", json={
+            "content": "import sys; print(sys.stdin.read().upper())"
+        })
+
+        resp = client.post("/governor/code/run", json={
+            "filepath": "tool.py", "stdin": "hello"
+        })
+        data = resp.json()
+        assert data["success"] is True
+        assert "HELLO" in data["stdout"]

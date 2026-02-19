@@ -544,7 +544,8 @@ async def _stream_via_daemon(
             }
             yield f"data: {json.dumps(sse_chunk)}\n\n"
 
-        # Final done chunk
+        # Final done chunk — includes turn_id for code builder
+        turn_id = f"turn-{uuid.uuid4().hex[:12]}"
         done_chunk = {
             "id": request_id,
             "object": "chat.completion.chunk",
@@ -557,6 +558,7 @@ async def _stream_via_daemon(
                     "finish_reason": "stop",
                 }
             ],
+            "turn_id": turn_id,
         }
         yield f"data: {json.dumps(done_chunk)}\n\n"
         yield "data: [DONE]\n\n"
@@ -979,6 +981,25 @@ def _get_research_store() -> Any:
     return _research_store
 
 
+# ============================================================================
+# Code Project Store (lazy init)
+# ============================================================================
+
+_project_store: Any = None
+
+
+def _get_project_store() -> Any:
+    """Lazy-init project store for code builder."""
+    global _project_store
+    if _project_store is None:
+        from gov_webui.project_store import CodeProjectStore
+
+        cm = _get_context_manager()
+        ctx = cm.get_or_create(GOVERNOR_CONTEXT_ID, mode=GOVERNOR_MODE)
+        _project_store = CodeProjectStore(ctx.governor_dir)
+    return _project_store
+
+
 class CaptureRequest(BaseModel):
     """Request to scan text for canon-worthy statements."""
     text: str
@@ -1021,6 +1042,54 @@ class ConstraintRequest(BaseModel):
     """Request to add a constraint."""
     constraint: str
     patterns: list[str] = Field(default_factory=list)
+
+
+# -- Code Builder request models -------------------------------------------
+
+class IntentUpdateRequest(BaseModel):
+    text: str
+    locked: bool = False
+    expected_version: int | None = None
+
+
+class ContractUpdateRequest(BaseModel):
+    description: str = ""
+    inputs: list[dict] = Field(default_factory=list)
+    outputs: list[dict] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    transport: str = "stdio"
+    expected_version: int | None = None
+
+
+class PlanItemRequest(BaseModel):
+    phase_idx: int
+    text: str
+
+
+class PlanItemStatusRequest(BaseModel):
+    status: str
+    expected_version: int | None = None
+
+
+class PhaseRequest(BaseModel):
+    name: str
+
+
+class PhaseUpdateRequest(BaseModel):
+    name: str | None = None
+    locked: bool | None = None
+
+
+class FileUpdateRequest(BaseModel):
+    content: str
+    turn_id: str | None = None
+
+
+class RunRequest(BaseModel):
+    filepath: str = "tool.py"
+    stdin: str = ""
+    timeout: int = 30
+    force: bool = False
 
 
 @app.get("/governor/fiction/characters")
@@ -1560,6 +1629,289 @@ async def code_compare_run(request: CompareRequest) -> dict[str, Any]:
 
     report = compute_code_divergence(irun, anchors)
     return {"run_id": irun.id, "report": report.to_dict()}
+
+
+# ============================================================================
+# Code Builder Endpoints
+# ============================================================================
+
+
+@app.get("/governor/code/project")
+async def code_project_state() -> dict[str, Any]:
+    """Full project state for sidebar polling."""
+    try:
+        store = _get_project_store()
+        return store.get_state()
+    except Exception:
+        return {"version": 0, "intent": {"text": "", "locked": False},
+                "contract": {}, "plan": {"phases": []}, "files": {}}
+
+
+@app.put("/governor/code/project/intent")
+async def code_update_intent(request: IntentUpdateRequest) -> dict[str, Any]:
+    """Update intent text + lock."""
+    from gov_webui.project_store import StaleVersionError
+
+    store = _get_project_store()
+    try:
+        intent = store.update_intent(
+            request.text, request.locked, request.expected_version
+        )
+        return {"success": True, "intent": intent.model_dump()}
+    except StaleVersionError:
+        raise HTTPException(409, "Stale version")
+
+
+@app.put("/governor/code/project/contract")
+async def code_update_contract(request: ContractUpdateRequest) -> dict[str, Any]:
+    """Update contract fields."""
+    from gov_webui.project_store import Contract, ContractField, StaleVersionError
+
+    # Parse input/output dicts into ContractField objects
+    inputs = [ContractField(**f) for f in request.inputs]
+    outputs = [ContractField(**f) for f in request.outputs]
+    contract = Contract(
+        description=request.description,
+        inputs=inputs,
+        outputs=outputs,
+        constraints=request.constraints,
+        transport=request.transport,
+    )
+    store = _get_project_store()
+    try:
+        result = store.update_contract(contract, request.expected_version)
+        return {"success": True, "contract": result.model_dump()}
+    except StaleVersionError:
+        raise HTTPException(409, "Stale version")
+
+
+@app.post("/governor/code/plan/item")
+async def code_add_plan_item(request: PlanItemRequest) -> dict[str, Any]:
+    """Add a plan item to a phase."""
+    store = _get_project_store()
+    try:
+        item = store.add_plan_item(request.phase_idx, request.text)
+        return {"success": True, "item": item.model_dump()}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/governor/code/plan/item/{item_id}")
+async def code_update_plan_item(
+    item_id: str, request: PlanItemStatusRequest
+) -> dict[str, Any]:
+    """Update plan item status with state machine validation."""
+    from gov_webui.project_store import PlanItemStatus, StaleVersionError
+
+    store = _get_project_store()
+    try:
+        status = PlanItemStatus(request.status)
+    except ValueError:
+        raise HTTPException(400, f"Invalid status: {request.status}")
+
+    try:
+        item = store.update_item_status(
+            item_id, status, request.expected_version
+        )
+        return {"success": True, "item": item.model_dump()}
+    except StaleVersionError:
+        raise HTTPException(409, "Stale version")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/governor/code/plan/phase")
+async def code_add_phase(request: PhaseRequest) -> dict[str, Any]:
+    """Add a new phase to the plan."""
+    store = _get_project_store()
+    phase = store.add_phase(request.name)
+    return {"success": True, "phase": phase.model_dump()}
+
+
+@app.patch("/governor/code/plan/phase/{idx}")
+async def code_update_phase(idx: int, request: PhaseUpdateRequest) -> dict[str, Any]:
+    """Update phase name/lock."""
+    store = _get_project_store()
+    try:
+        phase = store.update_phase(idx, request.name, request.locked)
+        return {"success": True, "phase": phase.model_dump()}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/governor/code/files")
+async def code_list_files() -> dict[str, Any]:
+    """List files with versions + hashes."""
+    store = _get_project_store()
+    return {"files": store.list_files()}
+
+
+@app.get("/governor/code/file-prev/{path:path}")
+async def code_get_file_prev(path: str) -> dict[str, Any]:
+    """Get previous version for client-side diff."""
+    store = _get_project_store()
+    try:
+        content = store.get_file_prev(path)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"filepath": path, "content": content}
+
+
+@app.get("/governor/code/files/{path:path}")
+async def code_get_file(path: str) -> dict[str, Any]:
+    """Get file content."""
+    store = _get_project_store()
+    try:
+        content = store.get_file_content(path)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if content is None:
+        raise HTTPException(404, f"File not found: {path}")
+    return {"filepath": path, "content": content}
+
+
+@app.put("/governor/code/files/{path:path}")
+async def code_put_file(path: str, request: FileUpdateRequest) -> dict[str, Any]:
+    """Accept file, returns version + hash."""
+    store = _get_project_store()
+    try:
+        entry = store.put_file(path, request.content, request.turn_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {
+        "success": True,
+        "filepath": path,
+        "version": entry.version,
+        "content_hash": entry.content_hash,
+    }
+
+
+@app.post("/governor/code/run")
+async def code_run(request: RunRequest) -> dict[str, Any]:
+    """Execute project files in tempdir, returns output."""
+    import subprocess
+    import sys
+    import tempfile
+
+    store = _get_project_store()
+    state = store.get_state()
+    files = state.get("files", {})
+
+    if not files:
+        raise HTTPException(400, "No files in project")
+
+    if request.filepath not in files:
+        raise HTTPException(404, f"Entrypoint not found: {request.filepath}")
+
+    # Constraint pre-flight check
+    preflight_violations: list[str] = []
+    try:
+        ctx, _ = _resolve_context()
+        if ctx is not None:
+            from governor.continuity import AnchorType, create_registry
+
+            registry = create_registry(ctx.governor_dir)
+            anchors = registry.all()
+            prohibitions = [
+                a for a in anchors
+                if a.anchor_type == AnchorType.PROHIBITION
+            ]
+
+            # Check all project files against prohibition patterns
+            for fpath in files:
+                content = store.get_file_content(fpath)
+                if content is None:
+                    continue
+                for anchor in prohibitions:
+                    for pattern in anchor.forbidden_patterns:
+                        if pattern.lower() in content.lower():
+                            preflight_violations.append(
+                                f"{fpath}: matches '{pattern}' "
+                                f"({anchor.description})"
+                            )
+    except Exception:
+        pass  # Pre-flight is best-effort
+
+    if preflight_violations and not request.force:
+        return {
+            "success": False,
+            "preflight_violations": preflight_violations,
+            "preflight_hit": True,
+            "forced": False,
+        }
+
+    # Execute in tempdir
+    tmpdir = None
+    try:
+        tmpdir = tempfile.mkdtemp(prefix="gov-code-run-")
+        tmpdir_path = Path(tmpdir)
+
+        # Write all accepted files into tempdir
+        for fpath in files:
+            content = store.get_file_content(fpath)
+            if content is None:
+                continue
+            dest = tmpdir_path / fpath
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content)
+
+        entrypoint = request.filepath
+        timeout = min(max(request.timeout, 1), 120)  # clamp 1-120s
+
+        result = subprocess.run(
+            [sys.executable, entrypoint],
+            cwd=tmpdir,
+            input=request.stdin or None,
+            capture_output=True,
+            timeout=timeout,
+            text=True,
+        )
+
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+
+        # Cap combined output at 100KB
+        max_output = 100 * 1024
+        combined_len = len(stdout) + len(stderr)
+        if combined_len > max_output:
+            # Truncate proportionally
+            ratio = max_output / combined_len
+            stdout = stdout[:int(len(stdout) * ratio)] + "\n…(truncated)"
+            stderr = stderr[:int(len(stderr) * ratio)] + "\n…(truncated)"
+
+        return {
+            "success": result.returncode == 0,
+            "returncode": result.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "filepath": request.filepath,
+            "preflight_hit": bool(preflight_violations),
+            "forced": request.force and bool(preflight_violations),
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "returncode": -1,
+            "stdout": "",
+            "stderr": f"Process killed: exceeded {request.timeout}s timeout",
+            "filepath": request.filepath,
+            "preflight_hit": bool(preflight_violations),
+            "forced": request.force and bool(preflight_violations),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "returncode": -1,
+            "stdout": "",
+            "stderr": str(e),
+            "filepath": request.filepath,
+            "preflight_hit": bool(preflight_violations),
+            "forced": request.force and bool(preflight_violations),
+        }
+    finally:
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ============================================================================

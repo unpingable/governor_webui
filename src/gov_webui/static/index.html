@@ -217,6 +217,49 @@
   .gov-toolbar { display: flex; gap: 0.4rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
   .gov-toolbar button { font-size: 0.75rem; padding: 0.3rem 0.6rem; }
   .import-file { display: none; }
+
+  /* Code Builder */
+  .plan-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+  .plan-item:last-child { border-bottom: none; }
+  .plan-item .status-icon { flex-shrink: 0; width: 1.2rem; text-align: center; }
+  .plan-item .item-text { flex: 1; }
+  .plan-item .item-actions { display: flex; gap: 0.2rem; }
+  .plan-item .item-actions button { padding: 0.15rem 0.4rem; font-size: 0.7rem; border: 1px solid var(--border); border-radius: 4px; background: var(--card-bg); color: var(--fg); cursor: pointer; }
+  .plan-item .item-actions button:hover { border-color: var(--accent); }
+  .plan-item.rejected { opacity: 0.5; text-decoration: line-through; }
+  .plan-item.completed .item-text { color: var(--badge-ok); }
+  .phase-header { font-size: 0.8rem; font-weight: 600; padding: 0.4rem 0 0.2rem; color: var(--accent); display: flex; align-items: center; gap: 0.3rem; }
+  .phase-header .lock-icon { font-size: 0.7rem; }
+  .contract-field { font-size: 0.8rem; padding: 0.15rem 0; }
+  .contract-field .field-name { font-weight: 500; }
+  .contract-field .field-type { color: var(--muted); font-size: 0.75rem; }
+  .transport-badge { font-size: 0.65rem; padding: 0.1rem 0.35rem; background: var(--accent-light); color: var(--accent); border-radius: 3px; font-weight: 500; }
+  .file-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+  .file-item:last-child { border-bottom: none; }
+  .file-item .file-name { flex: 1; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+  .file-item .version-badge { font-size: 0.7rem; padding: 0.1rem 0.3rem; background: var(--accent-light); color: var(--accent); border-radius: 3px; }
+  .run-controls { display: flex; gap: 0.4rem; padding: 0.5rem 0; }
+  .run-controls select { flex: 1; padding: 0.3rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--fg); font-size: 0.8rem; }
+  .run-output { margin: 0.5rem 0; padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.8rem; }
+  .run-output.success { border-left: 3px solid var(--badge-ok); background: var(--card-bg); }
+  .run-output.failure { border-left: 3px solid var(--badge-block); background: var(--card-bg); }
+  .run-output pre { background: var(--code-bg); padding: 0.5rem; border-radius: 4px; overflow-x: auto; font-size: 0.8em; margin: 0.25rem 0; white-space: pre-wrap; }
+  .run-output .stderr { color: var(--badge-block); }
+  .run-output .forced-badge { background: var(--badge-warn); color: #000; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.7rem; font-weight: 600; }
+  .preflight-warning { background: #78350f; border: 1px solid #b08000; border-radius: 6px; padding: 0.75rem; margin: 0.5rem 0; color: #fcd34d; font-size: 0.8rem; }
+  .diff-line { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.8rem; white-space: pre; }
+  .diff-add { color: var(--badge-ok); }
+  .diff-del { color: var(--badge-block); }
+  .diff-hdr { color: var(--accent); font-weight: 500; }
+  .diff-collapse { cursor: pointer; color: var(--muted); font-size: 0.75rem; user-select: none; }
+  .turn-meta { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; padding-top: 0.3rem; border-top: 1px solid var(--border); font-size: 0.7rem; color: var(--muted); }
+  .turn-meta .file-badge { background: var(--accent-light); color: var(--accent); padding: 0.1rem 0.35rem; border-radius: 3px; font-weight: 500; }
+  .code-block-actions { display: flex; gap: 0.3rem; margin-top: 0.3rem; }
+  .code-block-actions button { padding: 0.25rem 0.6rem; font-size: 0.75rem; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; background: var(--card-bg); color: var(--fg); }
+  .code-block-actions button.accept-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .code-block-actions button.accept-btn:hover { opacity: 0.9; }
+  .code-block-actions .accepted-badge { font-size: 0.75rem; color: var(--badge-ok); font-weight: 500; }
+  .constraint-text { color: var(--badge-block); font-size: 0.8rem; }
 </style>
 </head>
 <body>
@@ -355,6 +398,67 @@
 
     <!-- Code Mode Panel -->
     <div id="code-panel" class="hidden">
+      <!-- Intent -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Intent <span id="intent-lock-icon"></span></h3>
+        </div>
+        <div class="card-body" id="intent-body">
+          <textarea id="intent-text" placeholder="Describe what this tool should do..." style="width:100%;min-height:50px;resize:vertical;padding:0.4rem;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;background:var(--bg);color:var(--fg);"></textarea>
+          <div style="display:flex;gap:0.3rem;margin-top:0.3rem;">
+            <button class="gov-btn primary" onclick="saveIntent()" style="flex:1;font-size:0.78rem;">Save</button>
+            <button class="gov-btn" id="intent-lock-btn" onclick="toggleIntentLock()" style="font-size:0.78rem;">Lock</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contract -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Contract</h3>
+          <span class="transport-badge" id="contract-transport">stdio</span>
+        </div>
+        <div class="card-body" id="contract-body">
+          <div class="empty">No contract defined yet.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('edit-contract-modal')" style="width:100%;font-size:0.78rem;">Edit Contract</button>
+        </div>
+      </div>
+
+      <!-- Plan -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Plan</h3>
+          <span class="count" id="plan-count">0</span>
+        </div>
+        <div class="card-body" id="plan-body">
+          <div class="empty">No plan items yet.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem; display:flex; gap:0.3rem;">
+          <button class="gov-btn" onclick="openModal('add-plan-item-modal')" style="flex:1;font-size:0.78rem;">+ Add Item</button>
+          <button class="gov-btn" onclick="openModal('add-phase-modal')" style="font-size:0.78rem;">+ Phase</button>
+        </div>
+      </div>
+
+      <!-- Files + Run -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Files</h3>
+          <span class="count" id="files-count">0</span>
+        </div>
+        <div class="card-body" id="files-body">
+          <div class="empty">No files accepted yet.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <div class="run-controls">
+            <select id="run-entrypoint"></select>
+            <button class="gov-btn primary" onclick="runCode(false)" style="font-size:0.78rem;">Run</button>
+            <button class="gov-btn" onclick="runCode(true)" style="font-size:0.78rem;">Test</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Decisions -->
       <div class="card">
         <div class="card-header">
@@ -407,6 +511,8 @@
           <button class="gov-btn primary" onclick="runCompare()" style="font-size:0.8rem;" data-testid="compare-button">Compare</button>
         </div>
       </div>
+      <!-- Debug: state version -->
+      <div id="code-version-footer" style="text-align:right;font-size:0.65rem;color:var(--muted);padding:0.25rem 0.5rem;opacity:0.6;">state v<span id="state-version-display">0</span></div>
     </div>
 
     <!-- Research Mode Panel -->
@@ -598,6 +704,95 @@
     <div class="buttons">
       <button class="gov-btn" onclick="closeModal('add-constraint-modal')">Cancel</button>
       <button class="gov-btn primary" onclick="submitConstraint()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Contract Modal -->
+<div class="modal-overlay" id="edit-contract-modal">
+  <div class="modal wide">
+    <h3>Edit Contract</h3>
+    <div class="form-group">
+      <label>Description</label>
+      <textarea id="contract-desc-input" placeholder="What does this tool do?"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Inputs (one per line: name:type)</label>
+      <textarea id="contract-inputs-input" placeholder="filepath:str&#10;verbose:bool"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Outputs (one per line: name:type:description)</label>
+      <textarea id="contract-outputs-input" placeholder="rows:list:parsed data rows"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Constraints (one per line)</label>
+      <textarea id="contract-constraints-input" placeholder="No pandas&#10;Must handle UTF-8"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Transport</label>
+      <select id="contract-transport-input" style="width:100%;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:0.85rem;">
+        <option value="stdio">stdio</option>
+        <option value="http">http</option>
+        <option value="file">file</option>
+      </select>
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('edit-contract-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="saveContract()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Plan Item Modal -->
+<div class="modal-overlay" id="add-plan-item-modal">
+  <div class="modal">
+    <h3>Add Plan Item</h3>
+    <div class="form-group">
+      <label>Phase</label>
+      <select id="plan-item-phase" style="width:100%;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:0.85rem;"></select>
+    </div>
+    <div class="form-group">
+      <label>What needs to happen?</label>
+      <input type="text" id="plan-item-text" placeholder="Implement the parser...">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-plan-item-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitPlanItem()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Phase Modal -->
+<div class="modal-overlay" id="add-phase-modal">
+  <div class="modal">
+    <h3>Add Phase</h3>
+    <div class="form-group">
+      <label>Phase name</label>
+      <input type="text" id="phase-name-input" placeholder="Implementation">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-phase-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitPhase()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Accept File Modal -->
+<div class="modal-overlay" id="accept-file-modal">
+  <div class="modal wide">
+    <h3>Accept Code Block</h3>
+    <div class="form-group">
+      <label>Filename</label>
+      <input type="text" id="accept-filename" placeholder="tool.py">
+    </div>
+    <div id="accept-collision-warning" style="display:none;font-size:0.8rem;color:var(--badge-warn);margin-bottom:0.5rem;"></div>
+    <div id="accept-diff-container" style="display:none;margin-bottom:0.5rem;">
+      <div class="diff-collapse" onclick="var b=document.getElementById('accept-diff-body');b.classList.toggle('hidden');this.textContent=b.classList.contains('hidden')?'Show diff':'Hide diff';">Hide diff</div>
+      <div id="accept-diff-body" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:0.4rem;background:var(--code-bg);"></div>
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('accept-file-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="confirmAcceptFile()">Accept</button>
     </div>
   </div>
 </div>
@@ -1082,6 +1277,7 @@
                 bubble.innerHTML = renderMarkdown(accumulated);
                 document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
               }
+              if (parsed.turn_id) { _lastTurnId = parsed.turn_id; }
               if (parsed.choices && parsed.choices[0] && parsed.choices[0].finish_reason) {
                 finishGeneration(accumulated);
                 return;
@@ -1121,6 +1317,10 @@
     if (mode === 'research' && content) {
       scanForCaptures(content, _lastAssistantBubble);
       fetchWhyOverlay(content, _lastAssistantBubble);
+    }
+    // Code mode: extract code blocks for accept workflow
+    if (mode === 'code' && content) {
+      extractCodeBlocks(content, _lastAssistantBubble);
     }
   }
 
@@ -1272,6 +1472,173 @@
       html += '<div class="item"><div class="item-detail">' + esc(list[i].description) + '</div></div>';
     }
     el.innerHTML = html;
+  }
+
+  // ========== Code Builder Render ==========
+
+  var _lastTurnId = null;
+  var _pendingCodeBlocks = {};  // turnId -> [{code, lang}]
+  var _projectState = null;
+
+  function renderProjectState(state) {
+    _projectState = state;
+    renderIntent(state.intent || {});
+    renderContractCard(state.contract || {});
+    renderPlan(state.plan || { phases: [] });
+    renderFiles(state.files || {});
+    var versionEl = document.getElementById('state-version-display');
+    if (versionEl) versionEl.textContent = state.version || 0;
+  }
+
+  function renderIntent(intent) {
+    var textarea = document.getElementById('intent-text');
+    var lockBtn = document.getElementById('intent-lock-btn');
+    var lockIcon = document.getElementById('intent-lock-icon');
+
+    if (intent.locked) {
+      textarea.value = intent.text || '';
+      textarea.disabled = true;
+      lockBtn.textContent = 'Unlock';
+      lockIcon.textContent = '\uD83D\uDD12';
+    } else {
+      // Only update if user isn't actively editing
+      if (document.activeElement !== textarea) {
+        textarea.value = intent.text || '';
+      }
+      textarea.disabled = false;
+      lockBtn.textContent = 'Lock';
+      lockIcon.textContent = '';
+    }
+  }
+
+  function renderContractCard(contract) {
+    var body = document.getElementById('contract-body');
+    var transportEl = document.getElementById('contract-transport');
+    transportEl.textContent = contract.transport || 'stdio';
+
+    if (!contract.description && (!contract.inputs || contract.inputs.length === 0)) {
+      body.innerHTML = '<div class="empty">No contract defined yet.</div>';
+      return;
+    }
+
+    var html = '';
+    if (contract.description) {
+      html += '<div style="font-size:0.8rem;margin-bottom:0.4rem;">' + esc(contract.description) + '</div>';
+    }
+    if (contract.inputs && contract.inputs.length > 0) {
+      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Inputs</div>';
+      for (var i = 0; i < contract.inputs.length; i++) {
+        var f = contract.inputs[i];
+        html += '<div class="contract-field"><span class="field-name">' + esc(f.name) + '</span> <span class="field-type">' + esc(f.type) + '</span></div>';
+      }
+    }
+    if (contract.outputs && contract.outputs.length > 0) {
+      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Outputs</div>';
+      for (var j = 0; j < contract.outputs.length; j++) {
+        var o = contract.outputs[j];
+        html += '<div class="contract-field"><span class="field-name">' + esc(o.name) + '</span> <span class="field-type">' + esc(o.type) + '</span>';
+        if (o.description) html += ' <span class="field-type">— ' + esc(o.description) + '</span>';
+        html += '</div>';
+      }
+    }
+    if (contract.constraints && contract.constraints.length > 0) {
+      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--badge-block);margin-top:0.3rem;">Constraints</div>';
+      for (var k = 0; k < contract.constraints.length; k++) {
+        html += '<div class="constraint-text">' + esc(contract.constraints[k]) + '</div>';
+      }
+    }
+    body.innerHTML = html;
+  }
+
+  var planStatusIcons = {
+    proposed: '\uD83D\uDD32',
+    accepted: '\u2705',
+    in_progress: '\u23F3',
+    completed: '\u2705',
+    rejected: '\u274C'
+  };
+
+  function renderPlan(plan) {
+    var body = document.getElementById('plan-body');
+    var phases = plan.phases || [];
+    var totalItems = 0;
+    for (var p = 0; p < phases.length; p++) totalItems += (phases[p].items || []).length;
+    document.getElementById('plan-count').textContent = totalItems;
+
+    if (phases.length === 0) {
+      body.innerHTML = '<div class="empty">No plan items yet.</div>';
+      return;
+    }
+
+    // Update phase selector in modal
+    var phaseSelect = document.getElementById('plan-item-phase');
+    phaseSelect.innerHTML = '';
+    for (var ps = 0; ps < phases.length; ps++) {
+      var opt = document.createElement('option');
+      opt.value = ps;
+      opt.textContent = phases[ps].name;
+      phaseSelect.appendChild(opt);
+    }
+
+    var html = '';
+    for (var pi = 0; pi < phases.length; pi++) {
+      var phase = phases[pi];
+      html += '<div class="phase-header">';
+      if (phase.locked) html += '<span class="lock-icon">\uD83D\uDD12</span>';
+      html += esc(phase.name) + '</div>';
+
+      var items = phase.items || [];
+      for (var ii = 0; ii < items.length; ii++) {
+        var item = items[ii];
+        var statusClass = item.status === 'rejected' ? ' rejected' : item.status === 'completed' ? ' completed' : '';
+        html += '<div class="plan-item' + statusClass + '">';
+        html += '<span class="status-icon">' + (planStatusIcons[item.status] || '?') + '</span>';
+        html += '<span class="item-text">' + esc(item.text) + '</span>';
+        html += '<span class="item-actions">';
+
+        if (item.status === 'proposed') {
+          html += '<button onclick="updatePlanItemStatus(\'' + item.id + '\',\'accepted\')">Accept</button>';
+          html += '<button onclick="updatePlanItemStatus(\'' + item.id + '\',\'rejected\')">Reject</button>';
+        } else if (item.status === 'accepted') {
+          html += '<button onclick="updatePlanItemStatus(\'' + item.id + '\',\'in_progress\')">Start</button>';
+        } else if (item.status === 'in_progress') {
+          html += '<button onclick="updatePlanItemStatus(\'' + item.id + '\',\'completed\')">Done</button>';
+        }
+
+        html += '</span></div>';
+      }
+    }
+    body.innerHTML = html;
+  }
+
+  function renderFiles(files) {
+    var body = document.getElementById('files-body');
+    var entrySelect = document.getElementById('run-entrypoint');
+    var keys = Object.keys(files);
+    document.getElementById('files-count').textContent = keys.length;
+
+    if (keys.length === 0) {
+      body.innerHTML = '<div class="empty">No files accepted yet.</div>';
+      entrySelect.innerHTML = '';
+      return;
+    }
+
+    var html = '';
+    entrySelect.innerHTML = '';
+    for (var i = 0; i < keys.length; i++) {
+      var fname = keys[i];
+      var f = files[fname];
+      html += '<div class="file-item"><span class="file-name">' + esc(fname) + '</span>';
+      html += '<span class="version-badge">v' + f.version + '</span></div>';
+
+      if (fname.endsWith('.py')) {
+        var opt = document.createElement('option');
+        opt.value = fname;
+        opt.textContent = fname;
+        entrySelect.appendChild(opt);
+      }
+    }
+    body.innerHTML = html;
   }
 
   // ========== Compare (Code Interferometry) ==========
@@ -1605,11 +1972,13 @@
       Promise.all([
         fetch(BASE + '/governor/code/decisions').then(function(r) { return r.json(); }),
         fetch(BASE + '/governor/code/constraints').then(function(r) { return r.json(); }),
-        fetch(BASE + '/governor/code/compare/last').then(function(r) { return r.json(); })
+        fetch(BASE + '/governor/code/compare/last').then(function(r) { return r.json(); }),
+        fetch(BASE + '/governor/code/project').then(function(r) { return r.json(); })
       ]).then(function(results) {
         renderDecisions(results[0].decisions || []);
         renderConstraints(results[1].constraints || []);
         renderCompare(results[2].report || null);
+        renderProjectState(results[3]);
       }).catch(function() {});
     }
     if (mode === 'research') {
@@ -2117,6 +2486,390 @@
       refreshGovernor();
     }).catch(function(err) { alert('Could not save constraint: ' + err.message); });
   };
+
+  // ========== Code Builder Actions ==========
+
+  function _stateVersion() {
+    return _projectState ? _projectState.version : null;
+  }
+
+  function _handleVersionedResponse(r) {
+    if (r.status === 409) {
+      alert('Stale version — another tab may have changed state. Refreshing.');
+      refreshGovernor();
+      throw new Error('stale');
+    }
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
+    return r.json();
+  }
+
+  function _bumpVersion() {
+    // After a successful mutation, bump the cached version so the next
+    // mutation within the same polling cycle doesn't send a stale one.
+    if (_projectState) _projectState.version++;
+  }
+
+  window.saveIntent = function() {
+    var text = document.getElementById('intent-text').value;
+    var locked = _projectState && _projectState.intent ? _projectState.intent.locked : false;
+    fetch(BASE + '/governor/code/project/intent', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, locked: locked, expected_version: _stateVersion() })
+    }).then(_handleVersionedResponse).then(function() {
+      _bumpVersion();
+      refreshGovernor();
+    }).catch(function(err) { if (err.message !== 'stale') alert('Could not save intent: ' + err.message); });
+  };
+
+  window.toggleIntentLock = function() {
+    var text = document.getElementById('intent-text').value;
+    var currentLocked = _projectState && _projectState.intent ? _projectState.intent.locked : false;
+    fetch(BASE + '/governor/code/project/intent', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, locked: !currentLocked, expected_version: _stateVersion() })
+    }).then(_handleVersionedResponse).then(function() {
+      _bumpVersion();
+      refreshGovernor();
+    }).catch(function(err) { if (err.message !== 'stale') alert('Could not toggle lock: ' + err.message); });
+  };
+
+  window.saveContract = function() {
+    var desc = document.getElementById('contract-desc-input').value;
+    var inputsRaw = document.getElementById('contract-inputs-input').value;
+    var outputsRaw = document.getElementById('contract-outputs-input').value;
+    var constraintsRaw = document.getElementById('contract-constraints-input').value;
+    var transport = document.getElementById('contract-transport-input').value;
+
+    // Parse one-per-line formats
+    var inputs = [];
+    inputsRaw.split('\n').forEach(function(line) {
+      line = line.trim();
+      if (!line) return;
+      var parts = line.split(':');
+      inputs.push({ name: parts[0].trim(), type: (parts[1] || 'str').trim() });
+    });
+    var outputs = [];
+    outputsRaw.split('\n').forEach(function(line) {
+      line = line.trim();
+      if (!line) return;
+      var parts = line.split(':');
+      outputs.push({ name: parts[0].trim(), type: (parts[1] || 'str').trim(), description: (parts[2] || '').trim() });
+    });
+    var constraints = constraintsRaw.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l; });
+
+    fetch(BASE + '/governor/code/project/contract', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: desc, inputs: inputs, outputs: outputs, constraints: constraints, transport: transport, expected_version: _stateVersion() })
+    }).then(_handleVersionedResponse).then(function() {
+      _bumpVersion();
+      closeModal('edit-contract-modal');
+      refreshGovernor();
+    }).catch(function(err) { if (err.message !== 'stale') alert('Could not save contract: ' + err.message); });
+  };
+
+  window.submitPlanItem = function() {
+    var phaseIdx = parseInt(document.getElementById('plan-item-phase').value, 10);
+    var text = document.getElementById('plan-item-text').value.trim();
+    if (!text) return;
+    fetch(BASE + '/governor/code/plan/item', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phase_idx: phaseIdx, text: text })
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
+      closeModal('add-plan-item-modal');
+      document.getElementById('plan-item-text').value = '';
+      refreshGovernor();
+    }).catch(function(err) { alert('Could not add plan item: ' + err.message); });
+  };
+
+  window.submitPhase = function() {
+    var name = document.getElementById('phase-name-input').value.trim();
+    if (!name) return;
+    fetch(BASE + '/governor/code/plan/phase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name })
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
+      closeModal('add-phase-modal');
+      document.getElementById('phase-name-input').value = '';
+      refreshGovernor();
+    }).catch(function(err) { alert('Could not add phase: ' + err.message); });
+  };
+
+  window.updatePlanItemStatus = function(id, status) {
+    fetch(BASE + '/governor/code/plan/item/' + id, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: status, expected_version: _stateVersion() })
+    }).then(_handleVersionedResponse).then(function() {
+      _bumpVersion();
+      refreshGovernor();
+    }).catch(function(err) { if (err.message !== 'stale') alert('Could not update: ' + err.message); });
+  };
+
+  // ========== Code Block Handling ==========
+
+  function extractCodeBlocks(rawContent, bubble) {
+    if (!rawContent || !bubble) return;
+
+    var regex = /```(\w*)\n([\s\S]*?)```/g;
+    var parsedBlocks = [];
+    var match;
+    while ((match = regex.exec(rawContent)) !== null) {
+      parsedBlocks.push({ lang: match[1] || 'python', code: match[2].trim() });
+    }
+    if (parsedBlocks.length === 0) return;
+
+    // Use the turn_id from the SSE done chunk. If SSE reconnected and we
+    // missed it, generate a client-side fallback so blocks are still usable.
+    var turnId = _lastTurnId || ('local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8));
+    _pendingCodeBlocks[turnId] = parsedBlocks;
+
+    // Find rendered <pre> nodes in bubble
+    var renderedNodes = bubble.querySelectorAll('pre');
+
+    if (parsedBlocks.length !== renderedNodes.length) {
+      // Fallback: show a summary bar
+      var fallback = document.createElement('div');
+      fallback.className = 'code-block-actions';
+      fallback.innerHTML = '<span style="font-size:0.8rem;color:var(--muted);">' + parsedBlocks.length + ' code block(s) detected</span>';
+      for (var fi = 0; fi < parsedBlocks.length; fi++) {
+        (function(idx) {
+          var btn = document.createElement('button');
+          btn.className = 'accept-btn';
+          btn.textContent = 'Accept #' + (idx + 1);
+          btn.onclick = function() { acceptCodeBlock(turnId, idx); };
+          fallback.appendChild(btn);
+        })(fi);
+      }
+      bubble.parentNode.appendChild(fallback);
+      return;
+    }
+
+    // Attach Accept/Dismiss buttons below each <pre>
+    for (var i = 0; i < renderedNodes.length; i++) {
+      (function(idx) {
+        var actions = document.createElement('div');
+        actions.className = 'code-block-actions';
+        actions.setAttribute('data-block-idx', idx);
+        actions.setAttribute('data-turn-id', turnId);
+
+        var acceptBtn = document.createElement('button');
+        acceptBtn.className = 'accept-btn';
+        acceptBtn.textContent = 'Accept';
+        acceptBtn.onclick = function() { acceptCodeBlock(turnId, idx); };
+        actions.appendChild(acceptBtn);
+
+        var dismissBtn = document.createElement('button');
+        dismissBtn.textContent = 'Dismiss';
+        dismissBtn.onclick = function() { actions.remove(); };
+        actions.appendChild(dismissBtn);
+
+        renderedNodes[idx].parentNode.insertBefore(actions, renderedNodes[idx].nextSibling);
+      })(i);
+    }
+
+    // Add turn meta strip
+    var metaStrip = document.createElement('div');
+    metaStrip.className = 'turn-meta';
+    metaStrip.setAttribute('data-turn-id', turnId);
+    metaStrip.innerHTML = '<span style="color:var(--muted);">Turn: ' + esc(turnId) + '</span>';
+    bubble.parentNode.appendChild(metaStrip);
+  }
+
+  var _acceptingBlockTurnId = null;
+  var _acceptingBlockIdx = null;
+
+  window.acceptCodeBlock = function(turnId, blockIdx) {
+    _acceptingBlockTurnId = turnId;
+    _acceptingBlockIdx = blockIdx;
+
+    var blocks = _pendingCodeBlocks[turnId];
+    if (!blocks || !blocks[blockIdx]) return;
+
+    // Suggest filename
+    var filenameInput = document.getElementById('accept-filename');
+    filenameInput.value = 'tool.py';
+
+    // Check for collision
+    checkFileCollision(filenameInput.value);
+
+    // Listen for filename changes
+    filenameInput.oninput = function() { checkFileCollision(filenameInput.value); };
+
+    openModal('accept-file-modal');
+  };
+
+  function checkFileCollision(filename) {
+    var warning = document.getElementById('accept-collision-warning');
+    var diffContainer = document.getElementById('accept-diff-container');
+    var diffBody = document.getElementById('accept-diff-body');
+
+    if (!_projectState || !_projectState.files || !_projectState.files[filename]) {
+      warning.style.display = 'none';
+      diffContainer.style.display = 'none';
+      return;
+    }
+
+    var fileInfo = _projectState.files[filename];
+    warning.style.display = 'block';
+    warning.textContent = filename + ' exists (v' + fileInfo.version + '). Accepting creates v' + (fileInfo.version + 1) + '.';
+
+    // Fetch current content for diff
+    var blocks = _pendingCodeBlocks[_acceptingBlockTurnId];
+    var newCode = blocks && blocks[_acceptingBlockIdx] ? blocks[_acceptingBlockIdx].code : '';
+
+    fetch(BASE + '/governor/code/files/' + encodeURIComponent(filename))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.content) {
+          diffContainer.style.display = 'block';
+          diffBody.innerHTML = computeSimpleDiff(data.content, newCode);
+        }
+      }).catch(function() {});
+  }
+
+  function computeSimpleDiff(oldText, newText) {
+    var oldLines = oldText.split('\n');
+    var newLines = newText.split('\n');
+    var html = '<div class="diff-line diff-hdr">--- current</div><div class="diff-line diff-hdr">+++ new</div>';
+
+    var maxLen = Math.max(oldLines.length, newLines.length);
+    for (var i = 0; i < maxLen; i++) {
+      var oldLine = i < oldLines.length ? oldLines[i] : undefined;
+      var newLine = i < newLines.length ? newLines[i] : undefined;
+
+      if (oldLine === newLine) {
+        html += '<div class="diff-line"> ' + esc(oldLine) + '</div>';
+      } else {
+        if (oldLine !== undefined) {
+          html += '<div class="diff-line diff-del">-' + esc(oldLine) + '</div>';
+        }
+        if (newLine !== undefined) {
+          html += '<div class="diff-line diff-add">+' + esc(newLine) + '</div>';
+        }
+      }
+    }
+    return html;
+  }
+
+  window.confirmAcceptFile = function() {
+    var filename = document.getElementById('accept-filename').value.trim();
+    if (!filename) return;
+
+    var blocks = _pendingCodeBlocks[_acceptingBlockTurnId];
+    if (!blocks || !blocks[_acceptingBlockIdx]) return;
+
+    var content = blocks[_acceptingBlockIdx].code;
+
+    fetch(BASE + '/governor/code/files/' + encodeURIComponent(filename), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: content, turn_id: _acceptingBlockTurnId })
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Accept failed'); });
+      return r.json();
+    }).then(function(data) {
+      closeModal('accept-file-modal');
+
+      // Replace the accept buttons with a badge
+      var actionsEls = document.querySelectorAll('[data-turn-id="' + _acceptingBlockTurnId + '"][data-block-idx="' + _acceptingBlockIdx + '"]');
+      actionsEls.forEach(function(el) {
+        el.innerHTML = '<span class="accepted-badge">\u2705 ' + esc(filename) + ' v' + data.version + '</span>';
+      });
+
+      // Update turn meta
+      var metaEls = document.querySelectorAll('.turn-meta[data-turn-id="' + _acceptingBlockTurnId + '"]');
+      metaEls.forEach(function(el) {
+        var badge = document.createElement('span');
+        badge.className = 'file-badge';
+        badge.textContent = filename + ' v' + data.version;
+        el.appendChild(badge);
+      });
+
+      refreshGovernor();
+    }).catch(function(err) { alert('Could not accept file: ' + err.message); });
+  };
+
+  // ========== Run Code ==========
+
+  window.runCode = function(isTest) {
+    var entrySelect = document.getElementById('run-entrypoint');
+    var filepath = entrySelect.value;
+    if (!filepath) { alert('No file selected'); return; }
+
+    var body = { filepath: filepath, stdin: '', timeout: 30, force: false };
+    if (isTest) {
+      // Try to find a test file
+      var keys = _projectState ? Object.keys(_projectState.files || {}) : [];
+      var testFile = keys.find(function(k) { return k.startsWith('test_') && k.endsWith('.py'); });
+      if (testFile) body.filepath = testFile;
+    }
+
+    fetch(BASE + '/governor/code/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      displayRunOutput(data);
+    }).catch(function(err) { alert('Run failed: ' + err.message); });
+  };
+
+  function displayRunOutput(data) {
+    var messagesEl = document.getElementById('messages');
+
+    // Pre-flight violations
+    if (data.preflight_violations && data.preflight_violations.length > 0 && !data.forced) {
+      var warning = document.createElement('div');
+      warning.className = 'preflight-warning';
+      warning.innerHTML = '<div style="font-weight:600;margin-bottom:0.3rem;">Pre-flight check (best-effort pattern match)</div>';
+      for (var v = 0; v < data.preflight_violations.length; v++) {
+        warning.innerHTML += '<div>' + esc(data.preflight_violations[v]) + '</div>';
+      }
+      var forceBtn = document.createElement('button');
+      forceBtn.className = 'gov-btn';
+      forceBtn.style.marginTop = '0.4rem';
+      forceBtn.textContent = 'Run Anyway';
+      forceBtn.onclick = function() {
+        var body = { filepath: data.filepath || 'tool.py', stdin: '', timeout: 30, force: true };
+        fetch(BASE + '/governor/code/run', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(function(r) { return r.json(); }).then(function(d) {
+          warning.remove();
+          displayRunOutput(d);
+        }).catch(function() {});
+      };
+      warning.appendChild(forceBtn);
+      messagesEl.appendChild(warning);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return;
+    }
+
+    // Normal run output
+    var outputDiv = document.createElement('div');
+    outputDiv.className = 'run-output ' + (data.success ? 'success' : 'failure');
+
+    var header = '<div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.3rem;">';
+    header += '\u25B6 ' + esc(data.filepath || '');
+    if (data.returncode !== undefined) header += ' (exit ' + data.returncode + ')';
+    if (data.forced) header += ' <span class="forced-badge">\u26A0 FORCED</span>';
+    if (data.preflight_hit) header += ' <span style="font-size:0.7rem;color:var(--badge-warn);">preflight hit</span>';
+    header += '</div>';
+    outputDiv.innerHTML = header;
+
+    if (data.stdout) {
+      var stdoutPre = document.createElement('pre');
+      stdoutPre.textContent = data.stdout;
+      outputDiv.appendChild(stdoutPre);
+    }
+    if (data.stderr) {
+      var stderrPre = document.createElement('pre');
+      stderrPre.className = 'stderr';
+      stderrPre.textContent = data.stderr;
+      outputDiv.appendChild(stderrPre);
+    }
+
+    messagesEl.appendChild(outputDiv);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
 
   // ========== Compare ==========
 
