@@ -2192,3 +2192,121 @@ class TestWhyOverlay:
         assert "claim_count" in data["injected"]
         assert "sources" in data["referenced"]
         assert "candidates" in data["referenced"]
+
+
+# ============================================================================
+# TestUninitializedContext — regression tests for missing _context.json
+# ============================================================================
+
+
+class TestUninitializedContext:
+    """Verify that mutation endpoints return actionable errors when the
+    governor context metadata (_context.json) is missing.
+
+    Root cause of the Feb 2026 fiction panel bug: entrypoint.sh created
+    .governor/ but never wrote _context.json, so GovernorContextManager.get()
+    returned None and all mode-specific CRUD silently failed.
+    """
+
+    def test_fiction_characters_post_uninitialized(self, client) -> None:
+        """POST /governor/fiction/characters returns 400 with detail when no context."""
+        resp = client.post("/governor/fiction/characters", json={
+            "name": "Alice", "description": "Brave", "voice": "Dry", "wont": ""
+        })
+        assert resp.status_code == 400
+        data = resp.json()
+        assert "detail" in data
+        assert "context" in data["detail"].lower()
+
+    def test_fiction_characters_get_uninitialized(self, client) -> None:
+        """GET /governor/fiction/characters returns empty list (not error) when no context."""
+        resp = client.get("/governor/fiction/characters")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["characters"] == []
+
+    def test_fiction_world_rules_post_uninitialized(self, client) -> None:
+        """POST /governor/fiction/world-rules returns 400 when no context."""
+        resp = client.post("/governor/fiction/world-rules", json={"rule": "No flying"})
+        assert resp.status_code == 400
+        assert "detail" in resp.json()
+
+    def test_fiction_forbidden_post_uninitialized(self, client) -> None:
+        """POST /governor/fiction/forbidden returns 400 when no context."""
+        resp = client.post("/governor/fiction/forbidden", json={"description": "Time travel"})
+        assert resp.status_code == 400
+        assert "detail" in resp.json()
+
+    def test_code_decisions_post_uninitialized(self, client) -> None:
+        """POST /governor/code/decisions returns 400 when no context."""
+        resp = client.post("/governor/code/decisions", json={
+            "decision": "framework: react", "rationale": "popular"
+        })
+        assert resp.status_code == 400
+        assert "detail" in resp.json()
+
+    def test_code_constraints_post_uninitialized(self, client) -> None:
+        """POST /governor/code/constraints returns 400 when no context."""
+        resp = client.post("/governor/code/constraints", json={"constraint": "No eval"})
+        assert resp.status_code == 400
+        assert "detail" in resp.json()
+
+
+class TestInitializedFictionCRUD:
+    """Verify fiction CRUD works end-to-end when context is properly initialized."""
+
+    def test_character_roundtrip(self, client, tmp_contexts_dir) -> None:
+        """POST then GET /governor/fiction/characters returns the character."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        # Add character
+        resp = client.post("/governor/fiction/characters", json={
+            "name": "Elena", "description": "Tall", "voice": "Formal", "wont": "Show weakness"
+        })
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+        # Read back
+        resp = client.get("/governor/fiction/characters")
+        assert resp.status_code == 200
+        chars = resp.json()["characters"]
+        assert len(chars) == 1
+        assert chars[0]["name"] == "Elena"
+        assert "Formal" in chars[0]["description"]
+        assert chars[0]["wont"] is not None
+
+    def test_world_rule_roundtrip(self, client, tmp_contexts_dir) -> None:
+        """POST then GET /governor/fiction/world-rules returns the rule."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        resp = client.post("/governor/fiction/world-rules", json={"rule": "Magic costs blood"})
+        assert resp.status_code == 200
+
+        resp = client.get("/governor/fiction/world-rules")
+        rules = resp.json()["rules"]
+        assert len(rules) == 1
+        assert rules[0]["rule"] == "Magic costs blood"
+
+    def test_forbidden_roundtrip(self, client, tmp_contexts_dir) -> None:
+        """POST then GET /governor/fiction/forbidden returns the item."""
+        import gov_webui.adapter as adapter_mod
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("test-context", mode="fiction")
+        adapter_mod._context_manager = cm
+
+        resp = client.post("/governor/fiction/forbidden", json={"description": "Time travel"})
+        assert resp.status_code == 200
+
+        resp = client.get("/governor/fiction/forbidden")
+        forbidden = resp.json()["forbidden"]
+        assert len(forbidden) == 1
+        assert forbidden[0]["description"] == "Time travel"

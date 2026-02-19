@@ -1490,23 +1490,25 @@
     };
     fetch(BASE + '/governor/research/claims', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
-    }).then(function() {
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
       closeModal('add-claim-modal');
       document.getElementById('claim-content').value = '';
       document.getElementById('claim-scope').value = '';
       refreshGovernor();
-    });
+    }).catch(function(err) { alert('Could not save claim: ' + err.message); });
   };
 
   window.submitAssumption = function() {
     fetch(BASE + '/governor/research/assumptions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: document.getElementById('assumption-content').value })
-    }).then(function() {
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
       closeModal('add-assumption-modal');
       document.getElementById('assumption-content').value = '';
       refreshGovernor();
-    });
+    }).catch(function(err) { alert('Could not save assumption: ' + err.message); });
   };
 
   window.submitUncertainty = function() {
@@ -1516,12 +1518,13 @@
         content: document.getElementById('uncertainty-content').value,
         attached_to: document.getElementById('uncertainty-attached').value
       })
-    }).then(function() {
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
       closeModal('add-uncertainty-modal');
       document.getElementById('uncertainty-content').value = '';
       document.getElementById('uncertainty-attached').value = '';
       refreshGovernor();
-    });
+    }).catch(function(err) { alert('Could not save uncertainty: ' + err.message); });
   };
 
   window.submitLink = function() {
@@ -1532,25 +1535,32 @@
         from_id: document.getElementById('link-from').value,
         to_id: document.getElementById('link-to').value
       })
-    }).then(function() {
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
       closeModal('add-link-modal');
       document.getElementById('link-from').value = '';
       document.getElementById('link-to').value = '';
       refreshGovernor();
-    });
+    }).catch(function(err) { alert('Could not save link: ' + err.message); });
   };
 
   window.deleteResearchItem = function(type, id) {
     if (!confirm('Delete ' + id + '?')) return;
     fetch(BASE + '/governor/research/' + type + '/' + id, { method: 'DELETE' })
-      .then(function() { refreshGovernor(); });
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Delete failed'); });
+        refreshGovernor();
+      }).catch(function(err) { alert('Could not delete: ' + err.message); });
   };
 
   window.changeResearchStatus = function(type, id, status) {
     fetch(BASE + '/governor/research/' + type + '/' + id + '/status', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: status })
-    }).then(function() { refreshGovernor(); });
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Update failed'); });
+      refreshGovernor();
+    }).catch(function(err) { alert('Could not update status: ' + err.message); });
   };
 
   function renderCorrections(list) {
@@ -2045,36 +2055,39 @@
     };
     fetch(BASE + '/governor/fiction/characters', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
-    }).then(function() {
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
       closeModal('add-char-modal');
       document.getElementById('char-name').value = '';
       document.getElementById('char-desc').value = '';
       document.getElementById('char-voice').value = '';
       document.getElementById('char-wont').value = '';
       refreshGovernor();
-    });
+    }).catch(function(err) { alert('Could not save character: ' + err.message); });
   };
 
   window.submitRule = function() {
     fetch(BASE + '/governor/fiction/world-rules', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rule: document.getElementById('rule-text').value })
-    }).then(function() {
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
       closeModal('add-rule-modal');
       document.getElementById('rule-text').value = '';
       refreshGovernor();
-    });
+    }).catch(function(err) { alert('Could not save rule: ' + err.message); });
   };
 
   window.submitForbidden = function() {
     fetch(BASE + '/governor/fiction/forbidden', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ description: document.getElementById('forbid-text').value })
-    }).then(function() {
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
       closeModal('add-forbid-modal');
       document.getElementById('forbid-text').value = '';
       refreshGovernor();
-    });
+    }).catch(function(err) { alert('Could not save: ' + err.message); });
   };
 
   window.submitDecision = function() {
@@ -2084,23 +2097,25 @@
         decision: document.getElementById('decision-text').value,
         rationale: document.getElementById('decision-rationale').value
       })
-    }).then(function() {
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
       closeModal('add-decision-modal');
       document.getElementById('decision-text').value = '';
       document.getElementById('decision-rationale').value = '';
       refreshGovernor();
-    });
+    }).catch(function(err) { alert('Could not save decision: ' + err.message); });
   };
 
   window.submitConstraint = function() {
     fetch(BASE + '/governor/code/constraints', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ constraint: document.getElementById('constraint-text').value })
-    }).then(function() {
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
       closeModal('add-constraint-modal');
       document.getElementById('constraint-text').value = '';
       refreshGovernor();
-    });
+    }).catch(function(err) { alert('Could not save constraint: ' + err.message); });
   };
 
   // ========== Compare ==========

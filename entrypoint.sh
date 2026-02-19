@@ -6,9 +6,29 @@ CONTEXTS_DIR="${GOVERNOR_CONTEXTS_DIR:-/contexts}"
 CTX_ID="${GOVERNOR_CONTEXT_ID:-default}"
 GOV_DIR="$CONTEXTS_DIR/$CTX_ID/.governor"
 
+CTX_DIR="$CONTEXTS_DIR/$CTX_ID"
+CTX_META="$CTX_DIR/_context.json"
+
 if [ ! -d "$GOV_DIR" ]; then
     mkdir -p "$GOV_DIR/sessions"
     echo '{"sessions": {}, "mainline": null}' > "$GOV_DIR/sessions/index.json"
+fi
+
+# Write context metadata if missing (required by GovernorContextManager.get())
+if [ ! -f "$CTX_META" ]; then
+    MODE="${GOVERNOR_MODE:-general}"
+    NOW=$(python3 -c "from datetime import datetime,timezone; print(datetime.now(timezone.utc).isoformat())")
+    cat > "$CTX_META" <<CTXEOF
+{
+  "context_id": "$CTX_ID",
+  "mode": "$MODE",
+  "root": "$CTX_DIR",
+  "governor_dir": "$GOV_DIR",
+  "created_at": "$NOW",
+  "metadata": {}
+}
+CTXEOF
+    echo "Created context metadata: $CTX_META (mode=$MODE)"
 fi
 
 # Start governor daemon in background on a Unix socket
