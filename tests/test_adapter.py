@@ -40,6 +40,7 @@ def reset_adapter_globals() -> None:
     adapter_mod._session_store = None
     adapter_mod._daemon_client = None
     adapter_mod._project_store = None
+    adapter_mod._research_project_store = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
     adapter_mod._pending_research_captures.clear()
@@ -50,6 +51,7 @@ def reset_adapter_globals() -> None:
     adapter_mod._session_store = None
     adapter_mod._daemon_client = None
     adapter_mod._project_store = None
+    adapter_mod._research_project_store = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
     adapter_mod._pending_research_captures.clear()

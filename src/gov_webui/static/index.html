@@ -517,6 +517,65 @@
 
     <!-- Research Mode Panel -->
     <div id="research-panel" class="hidden">
+      <!-- Thesis (Research Intent) -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Thesis <span id="research-intent-lock-icon"></span></h3>
+        </div>
+        <div class="card-body" id="research-intent-body">
+          <textarea id="research-intent-text" placeholder="What is your research question or thesis?" style="width:100%;min-height:50px;resize:vertical;padding:0.4rem;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;background:var(--bg);color:var(--fg);"></textarea>
+          <div style="display:flex;gap:0.3rem;margin-top:0.3rem;">
+            <button class="gov-btn primary" onclick="saveResearchIntent()" style="flex:1;font-size:0.78rem;">Save</button>
+            <button class="gov-btn" id="research-intent-lock-btn" onclick="toggleResearchIntentLock()" style="font-size:0.78rem;">Lock</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scope (Research Contract) -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Scope</h3>
+        </div>
+        <div class="card-body" id="research-contract-body">
+          <div class="empty">No scope defined yet.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <button class="gov-btn" onclick="openModal('edit-research-scope-modal')" style="width:100%;font-size:0.78rem;">Edit Scope</button>
+        </div>
+      </div>
+
+      <!-- Research Plan -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Plan</h3>
+          <span class="count" id="research-plan-count">0</span>
+        </div>
+        <div class="card-body" id="research-plan-body">
+          <div class="empty">No plan items yet.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem; display:flex; gap:0.3rem;">
+          <button class="gov-btn" onclick="openModal('add-research-plan-item-modal')" style="flex:1;font-size:0.78rem;">+ Add Item</button>
+          <button class="gov-btn" onclick="openModal('add-research-phase-modal')" style="font-size:0.78rem;">+ Phase</button>
+        </div>
+      </div>
+
+      <!-- Drafts + Validate -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Drafts</h3>
+          <span class="count" id="research-files-count">0</span>
+        </div>
+        <div class="card-body" id="research-files-body">
+          <div class="empty">No drafts accepted yet.</div>
+        </div>
+        <div style="padding: 0 0.75rem 0.75rem;">
+          <div class="run-controls">
+            <select id="research-validate-target"></select>
+            <button class="gov-btn primary" onclick="validateResearchDraft()" style="font-size:0.78rem;">Validate</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Pending Research Captures Pill -->
       <div style="padding: 0.5rem 0.75rem 0;" id="research-pending-pill-container" class="hidden">
         <span class="pending-pill" onclick="openCaptureDrawer()" data-testid="research-pending-pill">
@@ -589,6 +648,8 @@
           <div class="empty">No collapse events.</div>
         </div>
       </div>
+      <!-- Debug: research project state version -->
+      <div id="research-version-footer" style="text-align:right;font-size:0.65rem;color:var(--muted);padding:0.25rem 0.5rem;opacity:0.6;">state v<span id="research-state-version-display">0</span></div>
     </div>
 
     <!-- Corrections Log (all modes) -->
@@ -793,6 +854,87 @@
     <div class="buttons">
       <button class="gov-btn" onclick="closeModal('accept-file-modal')">Cancel</button>
       <button class="gov-btn primary" onclick="confirmAcceptFile()">Accept</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Research Scope Modal -->
+<div class="modal-overlay" id="edit-research-scope-modal">
+  <div class="modal wide">
+    <h3>Edit Research Scope</h3>
+    <div class="form-group">
+      <label>Description / methodology</label>
+      <textarea id="research-scope-desc" placeholder="What are you investigating and how?"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Sources (one per line: name:type)</label>
+      <textarea id="research-scope-inputs" placeholder="PubMed:database&#10;Smith2023:paper"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Deliverables (one per line: name:type:description)</label>
+      <textarea id="research-scope-outputs" placeholder="draft.md:markdown:main paper draft&#10;notes.txt:text:working notes"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Constraints (one per line)</label>
+      <textarea id="research-scope-constraints" placeholder="No Wikipedia as primary source&#10;Avoid confirmation bias"></textarea>
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('edit-research-scope-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="saveResearchScope()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Research Plan Item Modal -->
+<div class="modal-overlay" id="add-research-plan-item-modal">
+  <div class="modal">
+    <h3>Add Research Plan Item</h3>
+    <div class="form-group">
+      <label>Phase</label>
+      <select id="research-plan-item-phase" style="width:100%;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:0.85rem;"></select>
+    </div>
+    <div class="form-group">
+      <label>What needs to happen?</label>
+      <input type="text" id="research-plan-item-text" placeholder="Review literature on...">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-research-plan-item-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitResearchPlanItem()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Research Phase Modal -->
+<div class="modal-overlay" id="add-research-phase-modal">
+  <div class="modal">
+    <h3>Add Research Phase</h3>
+    <div class="form-group">
+      <label>Phase name</label>
+      <input type="text" id="research-phase-name" placeholder="Literature Review">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('add-research-phase-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitResearchPhase()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Accept Research Draft Modal -->
+<div class="modal-overlay" id="accept-research-draft-modal">
+  <div class="modal wide">
+    <h3>Accept Draft</h3>
+    <div class="form-group">
+      <label>Filename</label>
+      <input type="text" id="accept-research-filename" placeholder="draft.md">
+    </div>
+    <div id="accept-research-collision-warning" style="display:none;font-size:0.8rem;color:var(--badge-warn);margin-bottom:0.5rem;"></div>
+    <div id="accept-research-diff-container" style="display:none;margin-bottom:0.5rem;">
+      <div class="diff-collapse" onclick="var b=document.getElementById('accept-research-diff-body');b.classList.toggle('hidden');this.textContent=b.classList.contains('hidden')?'Show diff':'Hide diff';">Hide diff</div>
+      <div id="accept-research-diff-body" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:0.4rem;background:var(--code-bg);"></div>
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('accept-research-draft-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="confirmAcceptResearchDraft()">Accept</button>
     </div>
   </div>
 </div>
@@ -1318,8 +1460,8 @@
       scanForCaptures(content, _lastAssistantBubble);
       fetchWhyOverlay(content, _lastAssistantBubble);
     }
-    // Code mode: extract code blocks for accept workflow
-    if (mode === 'code' && content) {
+    // Code + Research mode: extract code/text blocks for accept workflow
+    if ((mode === 'code' || mode === 'research') && content) {
       extractCodeBlocks(content, _lastAssistantBubble);
     }
   }
@@ -1982,8 +2124,12 @@
       }).catch(function() {});
     }
     if (mode === 'research') {
-      fetch(BASE + '/governor/research/state').then(function(r) { return r.json(); }).then(function(state) {
-        renderResearchPanel(state);
+      Promise.all([
+        fetch(BASE + '/governor/research/state').then(function(r) { return r.json(); }),
+        fetch(BASE + '/governor/research/project').then(function(r) { return r.json(); })
+      ]).then(function(results) {
+        renderResearchPanel(results[0]);
+        renderResearchProjectState(results[1]);
       }).catch(function() {});
     }
 
@@ -2624,6 +2770,9 @@
     var turnId = _lastTurnId || ('local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8));
     _pendingCodeBlocks[turnId] = parsedBlocks;
 
+    // Capture mode at render time for correct accept dispatch
+    var acceptFn = mode === 'research' ? acceptResearchBlock : acceptCodeBlock;
+
     // Find rendered <pre> nodes in bubble
     var renderedNodes = bubble.querySelectorAll('pre');
 
@@ -2631,15 +2780,15 @@
       // Fallback: show a summary bar
       var fallback = document.createElement('div');
       fallback.className = 'code-block-actions';
-      fallback.innerHTML = '<span style="font-size:0.8rem;color:var(--muted);">' + parsedBlocks.length + ' code block(s) detected</span>';
+      fallback.innerHTML = '<span style="font-size:0.8rem;color:var(--muted);">' + parsedBlocks.length + ' block(s) detected</span>';
       for (var fi = 0; fi < parsedBlocks.length; fi++) {
-        (function(idx) {
+        (function(idx, fn) {
           var btn = document.createElement('button');
           btn.className = 'accept-btn';
           btn.textContent = 'Accept #' + (idx + 1);
-          btn.onclick = function() { acceptCodeBlock(turnId, idx); };
+          btn.onclick = function() { fn(turnId, idx); };
           fallback.appendChild(btn);
-        })(fi);
+        })(fi, acceptFn);
       }
       bubble.parentNode.appendChild(fallback);
       return;
@@ -2647,7 +2796,7 @@
 
     // Attach Accept/Dismiss buttons below each <pre>
     for (var i = 0; i < renderedNodes.length; i++) {
-      (function(idx) {
+      (function(idx, fn) {
         var actions = document.createElement('div');
         actions.className = 'code-block-actions';
         actions.setAttribute('data-block-idx', idx);
@@ -2656,7 +2805,7 @@
         var acceptBtn = document.createElement('button');
         acceptBtn.className = 'accept-btn';
         acceptBtn.textContent = 'Accept';
-        acceptBtn.onclick = function() { acceptCodeBlock(turnId, idx); };
+        acceptBtn.onclick = function() { fn(turnId, idx); };
         actions.appendChild(acceptBtn);
 
         var dismissBtn = document.createElement('button');
@@ -2665,7 +2814,7 @@
         actions.appendChild(dismissBtn);
 
         renderedNodes[idx].parentNode.insertBefore(actions, renderedNodes[idx].nextSibling);
-      })(i);
+      })(i, acceptFn);
     }
 
     // Add turn meta strip
@@ -2870,6 +3019,367 @@
     messagesEl.appendChild(outputDiv);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
+
+  // ========== Research Project Render ==========
+
+  var _researchProjectState = null;
+
+  function _researchStateVersion() {
+    return _researchProjectState ? _researchProjectState.version : null;
+  }
+
+  function _handleResearchVersionedResponse(r) {
+    if (r.status === 409) {
+      alert('Stale version — another tab may have changed state. Refreshing.');
+      refreshGovernor();
+      throw new Error('stale');
+    }
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
+    return r.json();
+  }
+
+  function _bumpResearchVersion() {
+    if (_researchProjectState) _researchProjectState.version++;
+  }
+
+  function renderResearchProjectState(state) {
+    _researchProjectState = state;
+    renderResearchIntent(state.intent || {});
+    renderResearchScope(state.contract || {});
+    renderResearchPlan(state.plan || { phases: [] });
+    renderResearchFiles(state.files || {});
+    var vEl = document.getElementById('research-state-version-display');
+    if (vEl) vEl.textContent = state.version || 0;
+  }
+
+  function renderResearchIntent(intent) {
+    var textarea = document.getElementById('research-intent-text');
+    var lockBtn = document.getElementById('research-intent-lock-btn');
+    var lockIcon = document.getElementById('research-intent-lock-icon');
+
+    if (intent.locked) {
+      textarea.value = intent.text || '';
+      textarea.disabled = true;
+      lockBtn.textContent = 'Unlock';
+      lockIcon.textContent = '\uD83D\uDD12';
+    } else {
+      if (document.activeElement !== textarea) {
+        textarea.value = intent.text || '';
+      }
+      textarea.disabled = false;
+      lockBtn.textContent = 'Lock';
+      lockIcon.textContent = '';
+    }
+  }
+
+  function renderResearchScope(contract) {
+    var body = document.getElementById('research-contract-body');
+    if (!contract.description && (!contract.inputs || contract.inputs.length === 0)) {
+      body.innerHTML = '<div class="empty">No scope defined yet.</div>';
+      return;
+    }
+    var html = '';
+    if (contract.description) {
+      html += '<div style="font-size:0.8rem;margin-bottom:0.4rem;">' + esc(contract.description) + '</div>';
+    }
+    if (contract.inputs && contract.inputs.length > 0) {
+      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Sources</div>';
+      for (var i = 0; i < contract.inputs.length; i++) {
+        var f = contract.inputs[i];
+        html += '<div class="contract-field"><span class="field-name">' + esc(f.name) + '</span> <span class="field-type">' + esc(f.type) + '</span></div>';
+      }
+    }
+    if (contract.outputs && contract.outputs.length > 0) {
+      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--accent);margin-top:0.3rem;">Deliverables</div>';
+      for (var j = 0; j < contract.outputs.length; j++) {
+        var o = contract.outputs[j];
+        html += '<div class="contract-field"><span class="field-name">' + esc(o.name) + '</span> <span class="field-type">' + esc(o.type) + '</span>';
+        if (o.description) html += ' <span class="field-type">\u2014 ' + esc(o.description) + '</span>';
+        html += '</div>';
+      }
+    }
+    if (contract.constraints && contract.constraints.length > 0) {
+      html += '<div style="font-size:0.75rem;font-weight:600;color:var(--badge-block);margin-top:0.3rem;">Constraints</div>';
+      for (var k = 0; k < contract.constraints.length; k++) {
+        html += '<div class="constraint-text">' + esc(contract.constraints[k]) + '</div>';
+      }
+    }
+    body.innerHTML = html;
+  }
+
+  function renderResearchPlan(plan) {
+    var body = document.getElementById('research-plan-body');
+    var phases = plan.phases || [];
+    var totalItems = 0;
+    for (var p = 0; p < phases.length; p++) totalItems += (phases[p].items || []).length;
+    document.getElementById('research-plan-count').textContent = totalItems;
+
+    if (phases.length === 0) {
+      body.innerHTML = '<div class="empty">No plan items yet.</div>';
+      return;
+    }
+
+    var phaseSelect = document.getElementById('research-plan-item-phase');
+    phaseSelect.innerHTML = '';
+    for (var ps = 0; ps < phases.length; ps++) {
+      var opt = document.createElement('option');
+      opt.value = ps;
+      opt.textContent = phases[ps].name;
+      phaseSelect.appendChild(opt);
+    }
+
+    var html = '';
+    for (var pi = 0; pi < phases.length; pi++) {
+      var phase = phases[pi];
+      html += '<div class="phase-header">';
+      if (phase.locked) html += '<span class="lock-icon">\uD83D\uDD12</span>';
+      html += esc(phase.name) + '</div>';
+
+      var items = phase.items || [];
+      for (var ii = 0; ii < items.length; ii++) {
+        var item = items[ii];
+        var statusClass = item.status === 'rejected' ? ' rejected' : item.status === 'completed' ? ' completed' : '';
+        html += '<div class="plan-item' + statusClass + '">';
+        html += '<span class="status-icon">' + (planStatusIcons[item.status] || '?') + '</span>';
+        html += '<span class="item-text">' + esc(item.text) + '</span>';
+        html += '<span class="item-actions">';
+
+        if (item.status === 'proposed') {
+          html += '<button onclick="updateResearchPlanItemStatus(\'' + item.id + '\',\'accepted\')">Accept</button>';
+          html += '<button onclick="updateResearchPlanItemStatus(\'' + item.id + '\',\'rejected\')">Reject</button>';
+        } else if (item.status === 'accepted') {
+          html += '<button onclick="updateResearchPlanItemStatus(\'' + item.id + '\',\'in_progress\')">Start</button>';
+        } else if (item.status === 'in_progress') {
+          html += '<button onclick="updateResearchPlanItemStatus(\'' + item.id + '\',\'completed\')">Done</button>';
+        }
+
+        html += '</span></div>';
+      }
+    }
+    body.innerHTML = html;
+  }
+
+  function renderResearchFiles(files) {
+    var body = document.getElementById('research-files-body');
+    var select = document.getElementById('research-validate-target');
+    var keys = Object.keys(files);
+    document.getElementById('research-files-count').textContent = keys.length;
+
+    if (keys.length === 0) {
+      body.innerHTML = '<div class="empty">No drafts accepted yet.</div>';
+      select.innerHTML = '';
+      return;
+    }
+
+    var html = '';
+    select.innerHTML = '';
+    for (var i = 0; i < keys.length; i++) {
+      var fname = keys[i];
+      var f = files[fname];
+      html += '<div class="file-item"><span class="file-name">' + esc(fname) + '</span>';
+      html += '<span class="version-badge">v' + f.version + '</span></div>';
+
+      var opt = document.createElement('option');
+      opt.value = fname;
+      opt.textContent = fname;
+      select.appendChild(opt);
+    }
+    body.innerHTML = html;
+  }
+
+  // ========== Research Project Actions ==========
+
+  window.saveResearchIntent = function() {
+    var text = document.getElementById('research-intent-text').value;
+    var locked = _researchProjectState && _researchProjectState.intent ? _researchProjectState.intent.locked : false;
+    fetch(BASE + '/governor/research/project/intent', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, locked: locked, expected_version: _researchStateVersion() })
+    }).then(_handleResearchVersionedResponse).then(function() {
+      _bumpResearchVersion();
+      refreshGovernor();
+    }).catch(function(err) { if (err.message !== 'stale') alert('Could not save thesis: ' + err.message); });
+  };
+
+  window.toggleResearchIntentLock = function() {
+    var text = document.getElementById('research-intent-text').value;
+    var currentLocked = _researchProjectState && _researchProjectState.intent ? _researchProjectState.intent.locked : false;
+    fetch(BASE + '/governor/research/project/intent', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, locked: !currentLocked, expected_version: _researchStateVersion() })
+    }).then(_handleResearchVersionedResponse).then(function() {
+      _bumpResearchVersion();
+      refreshGovernor();
+    }).catch(function(err) { if (err.message !== 'stale') alert('Could not toggle lock: ' + err.message); });
+  };
+
+  window.saveResearchScope = function() {
+    var desc = document.getElementById('research-scope-desc').value;
+    var inputsRaw = document.getElementById('research-scope-inputs').value;
+    var outputsRaw = document.getElementById('research-scope-outputs').value;
+    var constraintsRaw = document.getElementById('research-scope-constraints').value;
+
+    var inputs = [];
+    inputsRaw.split('\n').forEach(function(line) {
+      line = line.trim();
+      if (!line) return;
+      var parts = line.split(':');
+      inputs.push({ name: parts[0].trim(), type: (parts[1] || 'source').trim() });
+    });
+    var outputs = [];
+    outputsRaw.split('\n').forEach(function(line) {
+      line = line.trim();
+      if (!line) return;
+      var parts = line.split(':');
+      outputs.push({ name: parts[0].trim(), type: (parts[1] || 'text').trim(), description: (parts[2] || '').trim() });
+    });
+    var constraints = constraintsRaw.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l; });
+
+    fetch(BASE + '/governor/research/project/contract', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: desc, inputs: inputs, outputs: outputs, constraints: constraints, transport: 'text', expected_version: _researchStateVersion() })
+    }).then(_handleResearchVersionedResponse).then(function() {
+      _bumpResearchVersion();
+      closeModal('edit-research-scope-modal');
+      refreshGovernor();
+    }).catch(function(err) { if (err.message !== 'stale') alert('Could not save scope: ' + err.message); });
+  };
+
+  window.submitResearchPlanItem = function() {
+    var phaseIdx = parseInt(document.getElementById('research-plan-item-phase').value, 10);
+    var text = document.getElementById('research-plan-item-text').value.trim();
+    if (!text) return;
+    fetch(BASE + '/governor/research/project/plan/item', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phase_idx: phaseIdx, text: text })
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
+      closeModal('add-research-plan-item-modal');
+      document.getElementById('research-plan-item-text').value = '';
+      refreshGovernor();
+    }).catch(function(err) { alert('Could not add plan item: ' + err.message); });
+  };
+
+  window.submitResearchPhase = function() {
+    var name = document.getElementById('research-phase-name').value.trim();
+    if (!name) return;
+    fetch(BASE + '/governor/research/project/plan/phase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name })
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Save failed'); });
+      closeModal('add-research-phase-modal');
+      document.getElementById('research-phase-name').value = '';
+      refreshGovernor();
+    }).catch(function(err) { alert('Could not add phase: ' + err.message); });
+  };
+
+  window.updateResearchPlanItemStatus = function(id, status) {
+    fetch(BASE + '/governor/research/project/plan/item/' + id, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: status, expected_version: _researchStateVersion() })
+    }).then(_handleResearchVersionedResponse).then(function() {
+      _bumpResearchVersion();
+      refreshGovernor();
+    }).catch(function(err) { if (err.message !== 'stale') alert('Could not update: ' + err.message); });
+  };
+
+  // ========== Research Draft Accept ==========
+
+  var _acceptingResearchTurnId = null;
+  var _acceptingResearchBlockIdx = null;
+
+  window.acceptResearchBlock = function(turnId, blockIdx) {
+    _acceptingResearchTurnId = turnId;
+    _acceptingResearchBlockIdx = blockIdx;
+
+    var blocks = _pendingCodeBlocks[turnId];
+    if (!blocks || !blocks[blockIdx]) return;
+
+    document.getElementById('accept-research-filename').value = 'draft.md';
+    checkResearchDraftCollision('draft.md');
+    document.getElementById('accept-research-filename').oninput = function() {
+      checkResearchDraftCollision(this.value);
+    };
+    openModal('accept-research-draft-modal');
+  };
+
+  function checkResearchDraftCollision(filename) {
+    var warning = document.getElementById('accept-research-collision-warning');
+    var diffContainer = document.getElementById('accept-research-diff-container');
+    var diffBody = document.getElementById('accept-research-diff-body');
+
+    if (!_researchProjectState || !_researchProjectState.files || !_researchProjectState.files[filename]) {
+      warning.style.display = 'none';
+      diffContainer.style.display = 'none';
+      return;
+    }
+
+    var fileInfo = _researchProjectState.files[filename];
+    warning.style.display = 'block';
+    warning.textContent = filename + ' exists (v' + fileInfo.version + '). Accepting creates v' + (fileInfo.version + 1) + '.';
+
+    var blocks = _pendingCodeBlocks[_acceptingResearchTurnId];
+    var newCode = blocks && blocks[_acceptingResearchBlockIdx] ? blocks[_acceptingResearchBlockIdx].code : '';
+
+    fetch(BASE + '/governor/research/project/files/' + encodeURIComponent(filename))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.content) {
+          diffContainer.style.display = 'block';
+          diffBody.innerHTML = computeSimpleDiff(data.content, newCode);
+        }
+      }).catch(function() {});
+  }
+
+  window.confirmAcceptResearchDraft = function() {
+    var filename = document.getElementById('accept-research-filename').value.trim();
+    if (!filename) return;
+
+    var blocks = _pendingCodeBlocks[_acceptingResearchTurnId];
+    if (!blocks || !blocks[_acceptingResearchBlockIdx]) return;
+    var content = blocks[_acceptingResearchBlockIdx].code;
+
+    fetch(BASE + '/governor/research/project/files/' + encodeURIComponent(filename), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: content, turn_id: _acceptingResearchTurnId })
+    }).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Accept failed'); });
+      return r.json();
+    }).then(function(data) {
+      closeModal('accept-research-draft-modal');
+
+      var actionsEls = document.querySelectorAll('[data-turn-id="' + _acceptingResearchTurnId + '"][data-block-idx="' + _acceptingResearchBlockIdx + '"]');
+      actionsEls.forEach(function(el) {
+        el.innerHTML = '<span class="accepted-badge">\u2705 ' + esc(filename) + ' v' + data.version + '</span>';
+      });
+
+      var metaEls = document.querySelectorAll('.turn-meta[data-turn-id="' + _acceptingResearchTurnId + '"]');
+      metaEls.forEach(function(el) {
+        var badge = document.createElement('span');
+        badge.className = 'file-badge';
+        badge.textContent = filename + ' v' + data.version;
+        el.appendChild(badge);
+      });
+
+      refreshGovernor();
+    }).catch(function(err) { alert('Could not accept draft: ' + err.message); });
+  };
+
+  // ========== Research Validate ==========
+
+  window.validateResearchDraft = function() {
+    var select = document.getElementById('research-validate-target');
+    var filepath = select.value;
+    if (!filepath) { alert('No draft selected'); return; }
+
+    fetch(BASE + '/governor/research/project/validate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filepath: filepath, stdin: '', timeout: 30, force: false })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      displayRunOutput(data);
+    }).catch(function(err) { alert('Validation failed: ' + err.message); });
+  };
 
   // ========== Compare ==========
 

@@ -48,8 +48,10 @@ VALID_TRANSITIONS: dict[PlanItemStatus, set[PlanItemStatus]] = {
 
 TERMINAL_STATUSES = {PlanItemStatus.completed, PlanItemStatus.rejected}
 
-# Phase 0 file extension allowlist
-ALLOWED_EXTENSIONS = {".py", ".txt", ".json", ".toml", ".cfg"}
+# Phase 0 file extension allowlists
+CODE_EXTENSIONS = {".py", ".txt", ".json", ".toml", ".cfg"}
+RESEARCH_EXTENSIONS = {".md", ".txt", ".bib", ".json", ".toml", ".csv"}
+ALLOWED_EXTENSIONS = CODE_EXTENSIONS  # default for backwards compat
 
 
 # ---------------------------------------------------------------------------
@@ -115,15 +117,22 @@ class ProjectState(BaseModel):
 # Path safety
 # ---------------------------------------------------------------------------
 
-def _validate_path(path: str, workspace_root: Path) -> Path:
+def _validate_path(
+    path: str,
+    workspace_root: Path,
+    allowed_extensions: set[str] | None = None,
+) -> Path:
     """Validate and resolve a workspace-relative path.
 
     Raises ValueError on:
     - absolute paths
     - '..' traversal
-    - extensions not in ALLOWED_EXTENSIONS
+    - extensions not in allowed set
     - resolved path outside workspace_root
     """
+    if allowed_extensions is None:
+        allowed_extensions = ALLOWED_EXTENSIONS
+
     if not path:
         raise ValueError("Empty path")
     if path.startswith("/"):
@@ -132,10 +141,10 @@ def _validate_path(path: str, workspace_root: Path) -> Path:
         raise ValueError(f"Path traversal not allowed: {path}")
 
     ext = Path(path).suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
+    if ext not in allowed_extensions:
         raise ValueError(
             f"Extension '{ext}' not allowed. "
-            f"Allowed: {sorted(ALLOWED_EXTENSIONS)}"
+            f"Allowed: {sorted(allowed_extensions)}"
         )
 
     resolved = (workspace_root / path).resolve()
@@ -150,12 +159,24 @@ def _validate_path(path: str, workspace_root: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 class CodeProjectStore:
-    """Manages project state + workspace files for the code builder."""
+    """Manages project state + workspace files for the code/research builder.
 
-    def __init__(self, governor_dir: Path) -> None:
-        self._dir = governor_dir / "code"
+    Args:
+        governor_dir: Path to the .governor directory.
+        subdir: Subdirectory name under governor_dir (default "code").
+        allowed_extensions: Set of allowed file extensions (default CODE_EXTENSIONS).
+    """
+
+    def __init__(
+        self,
+        governor_dir: Path,
+        subdir: str = "code",
+        allowed_extensions: set[str] | None = None,
+    ) -> None:
+        self._dir = governor_dir / subdir
         self._project_path = self._dir / "project.json"
         self._workspace = self._dir / "workspace"
+        self._allowed_extensions = allowed_extensions or CODE_EXTENSIONS
         self._lock = threading.Lock()
         self._state: ProjectState = self._load()
 
@@ -322,14 +343,14 @@ class CodeProjectStore:
 
     def get_file_content(self, path: str) -> str | None:
         """Read file content from workspace."""
-        resolved = _validate_path(path, self._workspace)
+        resolved = _validate_path(path, self._workspace, self._allowed_extensions)
         if resolved.exists():
             return resolved.read_text()
         return None
 
     def get_file_prev(self, path: str) -> str | None:
         """Read previous version (.prev) of a file."""
-        resolved = _validate_path(path, self._workspace)
+        resolved = _validate_path(path, self._workspace, self._allowed_extensions)
         prev_path = resolved.with_suffix(resolved.suffix + ".prev")
         if prev_path.exists():
             return prev_path.read_text()
@@ -343,7 +364,7 @@ class CodeProjectStore:
     ) -> FileEntry:
         """Write file to workspace, maintain one-deep .prev backup."""
         with self._lock:
-            resolved = _validate_path(path, self._workspace)
+            resolved = _validate_path(path, self._workspace, self._allowed_extensions)
             resolved.parent.mkdir(parents=True, exist_ok=True)
 
             # Move current to .prev if exists

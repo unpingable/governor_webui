@@ -196,3 +196,38 @@ Key gotcha: `GOVERNOR_SOCKET` must be set explicitly in the systemd unit —
 - Not where governance decisions are made — that's the daemon's job
 
 It's a window into the governor. The glass doesn't move the gears.
+
+## Phase 0 Boundaries (Code Builder + Research Builder)
+
+The code and research builders provide a structured iteration loop:
+intent/thesis → contract/scope → plan → accept file → run/validate → plan item flips.
+
+Two things this does **not** provide:
+
+1. **Preflight is not enforcement.** The code builder's pre-run constraint check
+   is a best-effort text pattern match against PROHIBITION anchors. It catches
+   obvious violations; it does not guarantee safety. The UI labels it
+   "Pre-flight check (best-effort pattern match)" and surfaces `preflight_hit`
+   and `forced` flags on every run response. Users can always force execution.
+
+2. **Execution is unsandboxed.** `POST /governor/code/run` creates a temp
+   directory, writes all accepted project files into it, and runs
+   `subprocess.run([sys.executable, entrypoint])` with no seccomp, no
+   container, no capability restriction. This is "runs on my machine" safety:
+   acceptable for local development, not acceptable for untrusted code.
+   Real sandboxing (containers, seccomp profiles) is a Phase 1+ concern.
+
+The research builder's `POST /governor/research/project/validate` endpoint
+runs text-based validation (weasel word detection, citation cross-checks,
+scope constraint matching). It is a heuristic linter, not a truth oracle.
+
+### What the loop does guarantee
+
+- **Chat never mutates project state.** Only explicit user actions (Accept,
+  status transitions) change intent, contract, plan, or files.
+- **Optimistic concurrency.** All versioned mutations require `expected_version`;
+  stale writes return HTTP 409.
+- **Phase gating.** Plan items in phase N cannot advance (except to `rejected`)
+  until all items in phase N-1 reach terminal status.
+- **Audit trail seeds.** Every file records `accepted_turn_id` and
+  `content_hash`; every run response includes `preflight_hit` and `forced`.

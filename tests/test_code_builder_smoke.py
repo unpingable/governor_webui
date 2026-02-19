@@ -31,6 +31,7 @@ def code_client(tmp_path: Path):
     adapter_mod._daemon_client = None
     adapter_mod._project_store = None
     adapter_mod._research_store = None
+    adapter_mod._research_project_store = None
     adapter_mod.GOVERNOR_CONTEXTS_DIR = str(tmp_path / "contexts")
     adapter_mod.GOVERNOR_CONTEXT_ID = "smoke-test"
     adapter_mod.GOVERNOR_MODE = "code"
@@ -52,6 +53,7 @@ def code_client(tmp_path: Path):
     adapter_mod._daemon_client = None
     adapter_mod._project_store = None
     adapter_mod._research_store = None
+    adapter_mod._research_project_store = None
 
 
 class TestCodeBuilderSmokeLoop:

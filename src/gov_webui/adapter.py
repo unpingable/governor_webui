@@ -1000,6 +1000,25 @@ def _get_project_store() -> Any:
     return _project_store
 
 
+_research_project_store: Any = None
+
+
+def _get_research_project_store() -> Any:
+    """Lazy-init project store for research builder."""
+    global _research_project_store
+    if _research_project_store is None:
+        from gov_webui.project_store import CodeProjectStore, RESEARCH_EXTENSIONS
+
+        cm = _get_context_manager()
+        ctx = cm.get_or_create(GOVERNOR_CONTEXT_ID, mode=GOVERNOR_MODE)
+        _research_project_store = CodeProjectStore(
+            ctx.governor_dir,
+            subdir="research_project",
+            allowed_extensions=RESEARCH_EXTENSIONS,
+        )
+    return _research_project_store
+
+
 class CaptureRequest(BaseModel):
     """Request to scan text for canon-worthy statements."""
     text: str
@@ -2238,6 +2257,275 @@ async def research_why_overlay(request: Request) -> dict[str, Any]:
 
     overlay = build_why_overlay(text, accepted_sources, accepted_claim_ids)
     return overlay.to_dict()
+
+
+# ============================================================================
+# Research Project Endpoints (structured workflow — parallel to code builder)
+# ============================================================================
+
+
+@app.get("/governor/research/project")
+async def research_project_state() -> dict[str, Any]:
+    """Full research project state for sidebar polling."""
+    try:
+        store = _get_research_project_store()
+        return store.get_state()
+    except Exception:
+        return {"version": 0, "intent": {"text": "", "locked": False},
+                "contract": {}, "plan": {"phases": []}, "files": {}}
+
+
+@app.put("/governor/research/project/intent")
+async def research_update_intent(request: IntentUpdateRequest) -> dict[str, Any]:
+    """Update thesis / research question."""
+    from gov_webui.project_store import StaleVersionError
+
+    store = _get_research_project_store()
+    try:
+        intent = store.update_intent(
+            request.text, request.locked, request.expected_version
+        )
+        return {"success": True, "intent": intent.model_dump()}
+    except StaleVersionError:
+        raise HTTPException(409, "Stale version")
+
+
+@app.put("/governor/research/project/contract")
+async def research_update_contract(request: ContractUpdateRequest) -> dict[str, Any]:
+    """Update research scope / methodology."""
+    from gov_webui.project_store import Contract, ContractField, StaleVersionError
+
+    inputs = [ContractField(**f) for f in request.inputs]
+    outputs = [ContractField(**f) for f in request.outputs]
+    contract = Contract(
+        description=request.description,
+        inputs=inputs,
+        outputs=outputs,
+        constraints=request.constraints,
+        transport=request.transport,
+    )
+    store = _get_research_project_store()
+    try:
+        result = store.update_contract(contract, request.expected_version)
+        return {"success": True, "contract": result.model_dump()}
+    except StaleVersionError:
+        raise HTTPException(409, "Stale version")
+
+
+@app.post("/governor/research/project/plan/item")
+async def research_add_plan_item(request: PlanItemRequest) -> dict[str, Any]:
+    """Add a plan item to a research phase."""
+    store = _get_research_project_store()
+    try:
+        item = store.add_plan_item(request.phase_idx, request.text)
+        return {"success": True, "item": item.model_dump()}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/governor/research/project/plan/item/{item_id}")
+async def research_update_plan_item(
+    item_id: str, request: PlanItemStatusRequest
+) -> dict[str, Any]:
+    """Update research plan item status."""
+    from gov_webui.project_store import PlanItemStatus, StaleVersionError
+
+    store = _get_research_project_store()
+    try:
+        status = PlanItemStatus(request.status)
+    except ValueError:
+        raise HTTPException(400, f"Invalid status: {request.status}")
+
+    try:
+        item = store.update_item_status(
+            item_id, status, request.expected_version
+        )
+        return {"success": True, "item": item.model_dump()}
+    except StaleVersionError:
+        raise HTTPException(409, "Stale version")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/governor/research/project/plan/phase")
+async def research_add_phase(request: PhaseRequest) -> dict[str, Any]:
+    """Add a new phase to the research plan."""
+    store = _get_research_project_store()
+    phase = store.add_phase(request.name)
+    return {"success": True, "phase": phase.model_dump()}
+
+
+@app.patch("/governor/research/project/plan/phase/{idx}")
+async def research_update_phase(idx: int, request: PhaseUpdateRequest) -> dict[str, Any]:
+    """Update research phase name/lock."""
+    store = _get_research_project_store()
+    try:
+        phase = store.update_phase(idx, request.name, request.locked)
+        return {"success": True, "phase": phase.model_dump()}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/governor/research/project/files")
+async def research_list_files() -> dict[str, Any]:
+    """List research drafts/notes with versions + hashes."""
+    store = _get_research_project_store()
+    return {"files": store.list_files()}
+
+
+@app.get("/governor/research/project/file-prev/{path:path}")
+async def research_get_file_prev(path: str) -> dict[str, Any]:
+    """Get previous version of a draft for client-side diff."""
+    store = _get_research_project_store()
+    try:
+        content = store.get_file_prev(path)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"filepath": path, "content": content}
+
+
+@app.get("/governor/research/project/files/{path:path}")
+async def research_get_file(path: str) -> dict[str, Any]:
+    """Get draft/note content."""
+    store = _get_research_project_store()
+    try:
+        content = store.get_file_content(path)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if content is None:
+        raise HTTPException(404, f"File not found: {path}")
+    return {"filepath": path, "content": content}
+
+
+@app.put("/governor/research/project/files/{path:path}")
+async def research_put_file(path: str, request: FileUpdateRequest) -> dict[str, Any]:
+    """Accept draft/note, returns version + hash."""
+    store = _get_research_project_store()
+    try:
+        entry = store.put_file(path, request.content, request.turn_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {
+        "success": True,
+        "filepath": path,
+        "version": entry.version,
+        "content_hash": entry.content_hash,
+    }
+
+
+@app.post("/governor/research/project/validate")
+async def research_validate(request: RunRequest) -> dict[str, Any]:
+    """Validate research drafts: citation checks, claim consistency.
+
+    Uses the same request shape as /code/run for UI symmetry, but instead
+    of executing code, runs text-based validation against registered claims.
+    """
+    store = _get_research_project_store()
+    state = store.get_state()
+    files = state.get("files", {})
+
+    if not files:
+        raise HTTPException(400, "No drafts in project")
+
+    if request.filepath not in files:
+        raise HTTPException(404, f"Draft not found: {request.filepath}")
+
+    draft_content = store.get_file_content(request.filepath)
+    if draft_content is None:
+        raise HTTPException(404, f"Draft content missing: {request.filepath}")
+
+    # -- Validation checks --------------------------------------------------
+    findings: list[str] = []
+
+    # 1. Cross-check against registered research claims
+    try:
+        rstore = _get_research_store()
+        rstate = rstore.get_state()
+        claims = rstate.get("claims", [])
+        assumptions = rstate.get("assumptions", [])
+
+        # Check for floating claims not referenced in draft
+        for claim in claims:
+            status = claim.get("status", "floating")
+            content = claim.get("content", "")
+            if status == "floating" and content:
+                # Simple heuristic: first 40 chars as search key
+                key = content[:40].lower()
+                if key not in draft_content.lower():
+                    findings.append(
+                        f"Floating claim not referenced in draft: "
+                        f"\"{content[:60]}{'...' if len(content) > 60 else ''}\""
+                    )
+
+        # Check for unresolved assumptions
+        for assumption in assumptions:
+            status = assumption.get("status", "proposed")
+            content = assumption.get("content", "")
+            if status == "proposed" and content:
+                findings.append(
+                    f"Unresolved assumption: "
+                    f"\"{content[:60]}{'...' if len(content) > 60 else ''}\""
+                )
+    except Exception:
+        pass  # Research store may not be initialized — that's fine
+
+    # 2. Check for common citation patterns
+    import re
+    # Unreferenced claims: sentences with "studies show" / "research suggests"
+    # without any citation marker
+    weasel_patterns = [
+        r"studies\s+show",
+        r"research\s+suggests",
+        r"it\s+is\s+widely\s+accepted",
+        r"experts\s+agree",
+        r"it\s+is\s+well\s+known",
+        r"evidence\s+suggests",
+    ]
+    lines = draft_content.split("\n")
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        for pattern in weasel_patterns:
+            if re.search(pattern, line_lower):
+                # Check if line has a citation marker [N] or (Author, YYYY)
+                if not re.search(r"\[\d+\]|\([A-Z]\w+,?\s*\d{4}\)", line):
+                    findings.append(
+                        f"Line {i + 1}: \"{pattern}\" without citation — "
+                        f"\"{line.strip()[:60]}{'...' if len(line.strip()) > 60 else ''}\""
+                    )
+
+    # 3. Check for constraint violations from research scope
+    contract = state.get("contract", {})
+    constraints = contract.get("constraints", [])
+    draft_lower = draft_content.lower()
+    constraint_hits: list[str] = []
+    for constraint in constraints:
+        # Simple text match
+        c_lower = constraint.lower()
+        # Check if the constraint describes something to avoid
+        if any(neg in c_lower for neg in ["no ", "avoid ", "don't ", "never "]):
+            # Extract the key term after the negation
+            for neg in ["no ", "avoid ", "don't ", "never "]:
+                if c_lower.startswith(neg):
+                    term = c_lower[len(neg):].strip().rstrip(".")
+                    if term and term in draft_lower:
+                        constraint_hits.append(
+                            f"Scope constraint may be violated: \"{constraint}\""
+                        )
+                    break
+
+    findings.extend(constraint_hits)
+
+    return {
+        "success": len(findings) == 0,
+        "returncode": 0 if len(findings) == 0 else 1,
+        "stdout": f"Validated {request.filepath}: "
+                  + (f"{len(findings)} finding(s)" if findings else "no issues found"),
+        "stderr": "\n".join(findings) if findings else "",
+        "filepath": request.filepath,
+        "preflight_hit": False,
+        "forced": False,
+        "findings": findings,
+    }
 
 
 @app.get("/governor/corrections")
