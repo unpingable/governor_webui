@@ -107,7 +107,7 @@ class TestRootEndpoint:
         response = client.get("/api/info")
         data = response.json()
         assert "version" in data
-        assert data["version"] == "0.3.0"
+        assert data["version"] == "0.4.0"
 
     def test_api_info_includes_endpoints(self, client) -> None:
         response = client.get("/api/info")

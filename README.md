@@ -66,6 +66,83 @@ Fiction mode is the proof that governance isn't just for crisp ground truth. If 
 
 ---
 
+## Structured Builders (Phase 0)
+
+Code and Research modes include a **structured iteration loop** that replaces "chat until it works" with a mechanically gated workflow:
+
+```
+Intent → Contract → Plan → Accept → Run/Validate → Done
+```
+
+Every step requires explicit user action. Chat never mutates project state. The builder sidebar shows where you are, what's locked, and what's next.
+
+### Code Builder: build a tool in 60 seconds
+
+```
+1. Set intent         "Parse CSV files and output JSON"
+2. Lock intent        (prevents drift — you said what you meant)
+3. Open wizard        Set artifact=tool, length=medium, voice=dry
+   → Save constraints (server hashes config, injects [CONSTRAINTS] block)
+4. Add plan phases    "Implementation" → "Testing"
+5. Add plan items     "Write parser function" / "Write unit tests"
+6. Chat               Ask the model to write the parser
+   → It sees your [CONSTRAINTS] block automatically
+7. Accept code block  Click Accept on the code → saved to workspace
+8. Advance plan       proposed → accepted → in_progress → completed
+9. Run                POST /governor/code/run — preflight check, then execute
+   → See stdout, stderr, returncode, preflight_hit, forced flags
+10. Repeat            Phase gating unlocks next phase when current completes
+```
+
+Plan items follow a state machine: `proposed → accepted → in_progress → completed`. Rejected is always available as an escape hatch. Phase N+1 is locked until phase N reaches terminal status.
+
+### Research Builder: scope a paper in 60 seconds
+
+```
+1. Set thesis         "How does cognitive load affect code review quality?"
+2. Lock thesis        (your question is your question)
+3. Open wizard        Set artifact=lit_review, voice=academic, citations=required,
+                      bans=["studies show", "experts agree"]
+   → Save constraints (model will see length band, voice, citation requirements)
+4. Add plan phases    "Literature Review" → "Synthesis"
+5. Chat               Ask the model to draft — constraints are live
+6. Accept draft       Click Accept on markdown → saved as .md to workspace
+7. Validate           POST /governor/research/project/validate
+   → Catches: weasel words without citations, banned phrases,
+     scope constraint violations, length band mismatches
+8. Iterate            Fix findings, re-accept, re-validate
+```
+
+The validator is a heuristic linter, not a truth oracle. It catches "studies show" without `[1]`, but it can't verify that `[1]` actually supports the claim.
+
+### Constraints Wizard
+
+Both builders share a **Constraints Wizard** that replaces the old freeform contract modal. Instead of typing constraints as prose, you set typed fields:
+
+| Field | Widget | Effect |
+|-------|--------|--------|
+| Artifact type | Dropdown | `tool`, `essay`, `lit_review`, etc. |
+| Length | Segmented | `short` / `medium` / `long` → word count bands |
+| Voice | Chips | `dry`, `wry`, `academic`, `spicy`, etc. |
+| Citations | Segmented | `none` / `light` / `required` |
+| Bans | Tag input | Literal phrases the model must avoid |
+| Format | Toggles | Tables, bullets, headings on/off |
+| Strict mode | Toggle | Warnings vs hard fails in validation |
+
+The wizard computes a canonical SHA-256 hash of the config. The server always recomputes — never trusts client hashes. The hash appears in the injected `[CONSTRAINTS config_hash=...]` block, in the sidebar, and in the "constraints active" pill above the chat input.
+
+A live preview panel shows the exact `[CONSTRAINTS]` block the model will see as you adjust widgets.
+
+### Phase 0 Boundaries
+
+See [ARCHITECTURE.md § Phase 0 Boundaries](ARCHITECTURE.md#phase-0-boundaries-code-builder--research-builder) for what the loop does and does **not** guarantee:
+- Preflight is best-effort pattern matching, not enforcement
+- Code execution is unsandboxed (`subprocess.run` in a temp dir)
+- Validation is heuristic, not proof
+- But: chat never mutates state, optimistic concurrency catches races, phase gating is real
+
+---
+
 ## Try it
 
 ### Docker (recommended)
@@ -156,7 +233,7 @@ All configuration is env vars.
 
 ```bash
 pip install -e ".[dev]"
-python3 -m pytest tests/ -v    # 282 tests
+python3 -m pytest tests/ -v    # 386 tests
 ```
 
 ### Screenshots
@@ -170,7 +247,8 @@ npm run screenshots                      # seed + capture 5 golden shots
 
 ## Docs
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — transport story, split-brain fix, ecosystem fit
+- [ARCHITECTURE.md](ARCHITECTURE.md) — transport story, split-brain fix, ecosystem fit, Phase 0 boundaries
+- [COMPAT.md](COMPAT.md) — version coupling, contract versions
 - [docs/API.md](docs/API.md) — full endpoint reference
 
 ---
