@@ -179,6 +179,34 @@
 
   .hidden { display: none !important; }
 
+  /* Disclosure: Maker / Builder */
+  .disclosure-toggle { margin-left: auto; }
+  body.disclosure-maker [data-disclosure="advanced"] { display: none !important; }
+  .gov-header { flex-wrap: wrap; gap: 0.4rem; }
+
+  /* Happy path CTA */
+  .happy-path-steps { display: flex; flex-direction: column; gap: 0.5rem; }
+  .happy-step { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem;
+    padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--card-bg); cursor: pointer; }
+  .happy-step:hover { border-color: var(--accent); }
+  .happy-step .step-num { width: 1.5rem; height: 1.5rem; border-radius: 50%;
+    background: var(--accent); color: #fff; display: flex; align-items: center;
+    justify-content: center; font-size: 0.72rem; font-weight: 700; flex-shrink: 0; }
+  .happy-step.done .step-num { background: var(--badge-ok); }
+  .happy-path-dismiss { font-size: 0.7rem; color: var(--muted); cursor: pointer;
+    text-align: right; margin-top: 0.3rem; }
+
+  /* Raw constraints expander */
+  .raw-constraints-toggle { font-size: 0.72rem; color: var(--accent); cursor: pointer;
+    margin-top: 0.4rem; user-select: none; }
+  .raw-constraints-body { display: none; margin-top: 0.3rem; }
+  .raw-constraints-body.open { display: block; }
+  .raw-constraints-pre { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.68rem;
+    background: var(--code-bg); color: var(--muted); padding: 0.5rem; border-radius: 6px;
+    white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto;
+    border: 1px solid var(--border); }
+
   /* Sidebar toggle for mobile */
   .sidebar-toggle { display: none; position: fixed; bottom: 1rem; right: 1rem; width: 48px; height: 48px; border-radius: 50%; background: var(--accent); color: #fff; border: none; font-size: 1.2rem; cursor: pointer; z-index: 50; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
 
@@ -365,6 +393,10 @@
     <div class="gov-header">
       <h2>Governor</h2>
       <span class="mode-badge" id="mode-badge">Loading...</span>
+      <div class="segmented disclosure-toggle" id="disclosure-toggle">
+        <button data-val="maker" class="active">Maker</button>
+        <button data-val="builder">Builder</button>
+      </div>
     </div>
 
     <!-- Status Banner -->
@@ -374,7 +406,7 @@
     </div>
 
     <!-- Backend Selector -->
-    <div class="card">
+    <div class="card" data-disclosure="advanced">
       <div class="card-header">
         <h3>Backend</h3>
         <span id="backend-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;"></span>
@@ -387,7 +419,7 @@
     </div>
 
     <!-- Governor Footer Visibility -->
-    <div class="card">
+    <div class="card" data-disclosure="advanced">
       <div class="card-header"><h3>Footer</h3></div>
       <div class="card-body" style="display:flex;align-items:center;gap:0.5rem;">
         <select class="model-select" id="footer-mode" onchange="setFooterMode(this.value)" style="flex:1;">
@@ -399,7 +431,7 @@
     </div>
 
     <!-- Export/Import Toolbar -->
-    <div class="gov-toolbar">
+    <div class="gov-toolbar" data-disclosure="advanced">
       <button class="gov-btn primary" onclick="exportAll()">Export All</button>
       <button class="gov-btn" onclick="exportChatMd()">Chat .md</button>
       <button class="gov-btn" onclick="exportChatJson()">Chat .json</button>
@@ -460,8 +492,26 @@
 
     <!-- Code Mode Panel -->
     <div id="code-panel" class="hidden">
+      <!-- Happy Path CTA -->
+      <div id="code-happy-path" class="hidden" style="margin-bottom:1rem;">
+        <div class="happy-path-steps">
+          <div class="happy-step" id="code-happy-step-1" onclick="openWizard(false)">
+            <span class="step-num">1</span>
+            <span>Set Contract — tell the model what to build</span>
+          </div>
+          <div class="happy-step" id="code-happy-step-2" onclick="openModal('add-plan-item-modal')">
+            <span class="step-num">2</span>
+            <span>Add Plan items (optional)</span>
+          </div>
+          <div class="happy-step" id="code-happy-step-3" onclick="document.getElementById('input').focus()">
+            <span class="step-num">3</span>
+            <span>Start drafting — send your first message</span>
+          </div>
+        </div>
+        <div class="happy-path-dismiss" onclick="dismissHappyPath('code')">dismiss</div>
+      </div>
       <!-- Intent -->
-      <div class="card">
+      <div class="card" data-disclosure="core">
         <div class="card-header">
           <h3>Intent <span id="intent-lock-icon"></span></h3>
         </div>
@@ -475,7 +525,7 @@
       </div>
 
       <!-- Contract -->
-      <div class="card">
+      <div class="card" data-disclosure="core">
         <div class="card-header">
           <h3>Contract</h3>
           <span class="transport-badge" id="contract-transport">stdio</span>
@@ -489,7 +539,7 @@
       </div>
 
       <!-- Plan -->
-      <div class="card">
+      <div class="card" data-disclosure="core">
         <div class="card-header">
           <h3>Plan</h3>
           <span class="count" id="plan-count">0</span>
@@ -504,7 +554,7 @@
       </div>
 
       <!-- Files + Run -->
-      <div class="card">
+      <div class="card" data-disclosure="core">
         <div class="card-header">
           <h3>Files</h3>
           <span class="count" id="files-count">0</span>
@@ -522,7 +572,7 @@
       </div>
 
       <!-- Decisions -->
-      <div class="card">
+      <div class="card" data-disclosure="advanced">
         <div class="card-header">
           <h3>Decisions</h3>
           <span class="count" id="decision-count">0</span>
@@ -536,7 +586,7 @@
       </div>
 
       <!-- Constraints -->
-      <div class="card">
+      <div class="card" data-disclosure="advanced">
         <div class="card-header">
           <h3>Constraints</h3>
           <span class="count" id="constraint-count">0</span>
@@ -550,7 +600,7 @@
       </div>
 
       <!-- Compare (Code Interferometry) -->
-      <div id="compare-banner" class="hidden" style="background: #3a2a00; border: 1px solid #b08000; border-radius: 8px; padding: 0.75rem; margin: 0.5rem; color: #ffd666;">
+      <div id="compare-banner" class="hidden" data-disclosure="advanced" style="background: #3a2a00; border: 1px solid #b08000; border-radius: 8px; padding: 0.75rem; margin: 0.5rem; color: #ffd666;">
         <div style="display: flex; align-items: center; gap: 0.5rem;">
           <span style="font-size: 1.2em;">⚠️</span>
           <span id="compare-banner-text">Models disagreed.</span>
@@ -560,7 +610,7 @@
           <button class="gov-btn" onclick="document.getElementById('compare-banner').classList.add('hidden')" style="flex: 1; font-size: 0.8em; background: transparent; border: 1px solid #666;">Dismiss</button>
         </div>
       </div>
-      <div class="card" id="compare-details" class="hidden">
+      <div class="card hidden" id="compare-details" data-disclosure="advanced">
         <div class="card-header">
           <h3>Compare</h3>
           <span class="count" id="compare-marker-count">0</span>
@@ -574,13 +624,31 @@
         </div>
       </div>
       <!-- Debug: state version -->
-      <div id="code-version-footer" style="text-align:right;font-size:0.65rem;color:var(--muted);padding:0.25rem 0.5rem;opacity:0.6;">state v<span id="state-version-display">0</span></div>
+      <div id="code-version-footer" data-disclosure="advanced" style="text-align:right;font-size:0.65rem;color:var(--muted);padding:0.25rem 0.5rem;opacity:0.6;">state v<span id="state-version-display">0</span></div>
     </div>
 
     <!-- Research Mode Panel -->
     <div id="research-panel" class="hidden">
+      <!-- Happy Path CTA -->
+      <div id="research-happy-path" class="hidden" style="margin-bottom:1rem;">
+        <div class="happy-path-steps">
+          <div class="happy-step" id="research-happy-step-1" onclick="openWizard(true)">
+            <span class="step-num">1</span>
+            <span>Set Scope — define artifact type and voice</span>
+          </div>
+          <div class="happy-step" id="research-happy-step-2" onclick="openModal('add-research-plan-item-modal')">
+            <span class="step-num">2</span>
+            <span>Add Plan items (optional)</span>
+          </div>
+          <div class="happy-step" id="research-happy-step-3" onclick="document.getElementById('input').focus()">
+            <span class="step-num">3</span>
+            <span>Start drafting — send your first message</span>
+          </div>
+        </div>
+        <div class="happy-path-dismiss" onclick="dismissHappyPath('research')">dismiss</div>
+      </div>
       <!-- Thesis (Research Intent) -->
-      <div class="card">
+      <div class="card" data-disclosure="core">
         <div class="card-header">
           <h3>Thesis <span id="research-intent-lock-icon"></span></h3>
         </div>
@@ -594,7 +662,7 @@
       </div>
 
       <!-- Scope (Research Contract) -->
-      <div class="card">
+      <div class="card" data-disclosure="core">
         <div class="card-header">
           <h3>Scope</h3>
         </div>
@@ -607,7 +675,7 @@
       </div>
 
       <!-- Research Plan -->
-      <div class="card">
+      <div class="card" data-disclosure="core">
         <div class="card-header">
           <h3>Plan</h3>
           <span class="count" id="research-plan-count">0</span>
@@ -622,7 +690,7 @@
       </div>
 
       <!-- Drafts + Validate -->
-      <div class="card">
+      <div class="card" data-disclosure="core">
         <div class="card-header">
           <h3>Drafts</h3>
           <span class="count" id="research-files-count">0</span>
@@ -639,13 +707,13 @@
       </div>
 
       <!-- Pending Research Captures Pill -->
-      <div style="padding: 0.5rem 0.75rem 0;" id="research-pending-pill-container" class="hidden">
+      <div style="padding: 0.5rem 0.75rem 0;" id="research-pending-pill-container" class="hidden" data-disclosure="diagnostic">
         <span class="pending-pill" onclick="openCaptureDrawer()" data-testid="research-pending-pill">
           <span id="research-pending-pill-count">0</span> pending
         </span>
       </div>
       <!-- Claims -->
-      <div class="card">
+      <div class="card" data-disclosure="advanced">
         <div class="card-header">
           <h3>Claims</h3>
           <span class="count" id="claim-count">0</span>
@@ -659,7 +727,7 @@
       </div>
 
       <!-- Assumptions -->
-      <div class="card">
+      <div class="card" data-disclosure="advanced">
         <div class="card-header">
           <h3>Assumptions</h3>
           <span class="count" id="assumption-count">0</span>
@@ -673,7 +741,7 @@
       </div>
 
       <!-- Uncertainties -->
-      <div class="card">
+      <div class="card" data-disclosure="advanced">
         <div class="card-header">
           <h3>Uncertainties</h3>
           <span class="count" id="uncertainty-count">0</span>
@@ -687,7 +755,7 @@
       </div>
 
       <!-- Links -->
-      <div class="card">
+      <div class="card" data-disclosure="advanced">
         <div class="card-header">
           <h3>Links</h3>
           <span class="count" id="link-count">0</span>
@@ -701,7 +769,7 @@
       </div>
 
       <!-- Collapse History -->
-      <div class="card">
+      <div class="card" data-disclosure="advanced">
         <div class="card-header">
           <h3>History</h3>
           <span class="count" id="collapse-count">0</span>
@@ -711,11 +779,11 @@
         </div>
       </div>
       <!-- Debug: research project state version -->
-      <div id="research-version-footer" style="text-align:right;font-size:0.65rem;color:var(--muted);padding:0.25rem 0.5rem;opacity:0.6;">state v<span id="research-state-version-display">0</span></div>
+      <div id="research-version-footer" data-disclosure="advanced" style="text-align:right;font-size:0.65rem;color:var(--muted);padding:0.25rem 0.5rem;opacity:0.6;">state v<span id="research-state-version-display">0</span></div>
     </div>
 
     <!-- Corrections Log (all modes) -->
-    <div class="card">
+    <div class="card" data-disclosure="diagnostic">
       <div class="card-header">
         <h3>Corrections</h3>
       </div>
@@ -1249,6 +1317,52 @@
   var GOV_REFRESH = 3000;
   var BASE = window.location.origin;
 
+  // ========== Disclosure: Maker / Builder ==========
+
+  function queryParam(name) {
+    var match = location.search.match(new RegExp('[?&]' + name + '=([^&]*)'));
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  var _disclosureFromParam = queryParam('disclosure');
+
+  function disclosurePersistKey() {
+    return 'ui_disclosure_v1_' + mode;
+  }
+
+  function applyDisclosure(level, persist) {
+    document.body.classList.toggle('disclosure-maker', level === 'maker');
+    var btns = document.querySelectorAll('#disclosure-toggle button');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle('active', btns[i].getAttribute('data-val') === level);
+    }
+    if (persist) {
+      try { localStorage.setItem(disclosurePersistKey(), level); } catch(e) {}
+    }
+    // Prevent focus landing nowhere after hidden elements
+    var inp = document.getElementById('input');
+    if (inp && document.activeElement && document.activeElement.offsetParent === null) {
+      inp.focus();
+    }
+  }
+
+  (function() {
+    var toggle = document.getElementById('disclosure-toggle');
+    if (!toggle) return;
+    toggle.addEventListener('click', function(e) {
+      var btn = e.target.closest('button');
+      if (!btn) return;
+      var val = btn.getAttribute('data-val');
+      if (val) applyDisclosure(val, true);
+    });
+  })();
+
+  // Boot disclosure: apply query param (don't persist) or localStorage
+  (function() {
+    var level = _disclosureFromParam || localStorage.getItem(disclosurePersistKey()) || 'maker';
+    applyDisclosure(level, !_disclosureFromParam);
+  })();
+
   // ========== Utilities ==========
 
   function esc(s) {
@@ -1727,6 +1841,20 @@
     document.getElementById('fiction-panel').classList.toggle('hidden', m !== 'fiction');
     document.getElementById('code-panel').classList.toggle('hidden', m !== 'code');
     document.getElementById('research-panel').classList.toggle('hidden', m !== 'research');
+
+    // Disclosure toggle: hide in fiction/general, force builder so global cards stay visible
+    var discToggle = document.getElementById('disclosure-toggle');
+    if (discToggle) {
+      discToggle.style.display = (m === 'fiction' || m === 'general') ? 'none' : '';
+    }
+    if (m === 'fiction' || m === 'general') {
+      document.body.classList.remove('disclosure-maker');
+    } else {
+      // Re-read per-mode persist key and apply
+      var key = 'ui_disclosure_v1_' + m;
+      var level = _disclosureFromParam || localStorage.getItem(key) || 'maker';
+      applyDisclosure(level, !_disclosureFromParam);
+    }
   }
 
   function setStatus(status, text) {
@@ -1800,6 +1928,43 @@
     el.innerHTML = html;
   }
 
+  // ========== Happy Path CTA ==========
+
+  function hasRealArtifact(state) {
+    if (state.files && Object.keys(state.files).length > 0) return true;
+    if (state.runs && state.runs.length > 0) return true;
+    return false;
+  }
+
+  function updateHappyPath(modeKey, state) {
+    var el = document.getElementById(modeKey + '-happy-path');
+    if (!el) return;
+    var dismissKey = 'happy_path_dismissed_v1_' + modeKey;
+    if (localStorage.getItem(dismissKey)) { el.classList.add('hidden'); return; }
+    if (hasRealArtifact(state)) { el.classList.add('hidden'); return; }
+
+    el.classList.remove('hidden');
+
+    // Mark completed steps
+    var step1 = document.getElementById(modeKey + '-happy-step-1');
+    var step2 = document.getElementById(modeKey + '-happy-step-2');
+    var contract = state.contract || {};
+    var hasContract = (contract.config && typeof contract.config === 'object') || contract.description;
+    if (step1) step1.classList.toggle('done', !!hasContract);
+
+    var plan = state.plan || { phases: [] };
+    var totalItems = 0;
+    var phases = plan.phases || [];
+    for (var p = 0; p < phases.length; p++) totalItems += (phases[p].items || []).length;
+    if (step2) step2.classList.toggle('done', totalItems > 0);
+  }
+
+  window.dismissHappyPath = function(modeKey) {
+    try { localStorage.setItem('happy_path_dismissed_v1_' + modeKey, '1'); } catch(e) {}
+    var el = document.getElementById(modeKey + '-happy-path');
+    if (el) el.classList.add('hidden');
+  };
+
   // ========== Code Builder Render ==========
 
   var _lastTurnId = null;
@@ -1828,6 +1993,7 @@
     updateConstraintsPill(state.contract);
     var versionEl = document.getElementById('state-version-display');
     if (versionEl) versionEl.textContent = state.version || 0;
+    updateHappyPath('code', state);
   }
 
   function renderIntent(intent) {
@@ -1911,6 +2077,15 @@
       for (var k = 0; k < contract.constraints.length; k++) {
         html += '<div class="constraint-text">' + esc(contract.constraints[k]) + '</div>';
       }
+    }
+
+    // Raw constraints expander (shows what the model saw)
+    // Preserve open state across poll rerenders
+    var wasOpen = body.querySelector('.raw-constraints-body.open') !== null;
+    if (hasConfig) {
+      var block = buildConstraintsBlock(contract.config, contract.config_hash || '');
+      html += '<div class="raw-constraints-toggle" onclick="var b=this.nextElementSibling;b.classList.toggle(\'open\');this.textContent=b.classList.contains(\'open\')?\'\u25BE Hide raw constraints\':\'\u25B8 Show raw constraints\';">' + (wasOpen ? '\u25BE Hide raw constraints' : '\u25B8 Show raw constraints') + '</div>';
+      html += '<div class="raw-constraints-body' + (wasOpen ? ' open' : '') + '"><pre class="raw-constraints-pre">' + esc(block) + '</pre></div>';
     }
     body.innerHTML = html;
   }
@@ -2801,10 +2976,11 @@
     return c;
   }
 
-  function renderWizardPreview() {
-    var config = extractWizardConfig();
+  function buildConstraintsBlock(config, hash) {
     var lines = [];
-    lines.push('[CONSTRAINTS config_hash=<computed>]');
+    lines.push('[CONSTRAINTS config_hash=' + (hash || '<computed>') + ']');
+    lines.push('constraints_format_version: 1');
+    lines.push('rendered_by: ui');
     if (config.artifact_type) lines.push('artifact_type: ' + config.artifact_type);
     var band = _LENGTH_BANDS[config.length] || [800, 2000];
     lines.push('length_band: ' + (config.length || 'medium'));
@@ -2823,7 +2999,12 @@
     if (config.structure && config.structure.length) lines.push('structure: ' + config.structure.join(', '));
     lines.push('strict: ' + (config.strict ? 'true' : 'false'));
     lines.push('[/CONSTRAINTS]');
-    document.getElementById('wiz-preview').textContent = lines.join('\n');
+    return lines.join('\n');
+  }
+
+  function renderWizardPreview() {
+    var config = extractWizardConfig();
+    document.getElementById('wiz-preview').textContent = buildConstraintsBlock(config, '<computed>');
   }
 
   function populateWizardFromConfig(config) {
@@ -3721,6 +3902,7 @@
     updateConstraintsPill(state.contract);
     var vEl = document.getElementById('research-state-version-display');
     if (vEl) vEl.textContent = state.version || 0;
+    updateHappyPath('research', state);
   }
 
   function renderResearchIntent(intent) {
@@ -3800,6 +3982,15 @@
       for (var k = 0; k < contract.constraints.length; k++) {
         html += '<div class="constraint-text">' + esc(contract.constraints[k]) + '</div>';
       }
+    }
+
+    // Raw constraints expander (shows what the model saw)
+    // Preserve open state across poll rerenders
+    var wasOpen = body.querySelector('.raw-constraints-body.open') !== null;
+    if (hasConfig) {
+      var block = buildConstraintsBlock(contract.config, contract.config_hash || '');
+      html += '<div class="raw-constraints-toggle" onclick="var b=this.nextElementSibling;b.classList.toggle(\'open\');this.textContent=b.classList.contains(\'open\')?\'\u25BE Hide raw constraints\':\'\u25B8 Show raw constraints\';">' + (wasOpen ? '\u25BE Hide raw constraints' : '\u25B8 Show raw constraints') + '</div>';
+      html += '<div class="raw-constraints-body' + (wasOpen ? ' open' : '') + '"><pre class="raw-constraints-pre">' + esc(block) + '</pre></div>';
     }
     body.innerHTML = html;
   }
