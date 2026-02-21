@@ -41,10 +41,12 @@ def reset_adapter_globals() -> None:
     adapter_mod._daemon_client = None
     adapter_mod._project_store = None
     adapter_mod._research_project_store = None
+    adapter_mod._artifact_store = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
     adapter_mod._pending_research_captures.clear()
     adapter_mod._research_capture_counter = 0
+    adapter_mod._turn_seq = 0
     yield
     adapter_mod._bridge = None
     adapter_mod._context_manager = None
@@ -52,10 +54,12 @@ def reset_adapter_globals() -> None:
     adapter_mod._daemon_client = None
     adapter_mod._project_store = None
     adapter_mod._research_project_store = None
+    adapter_mod._artifact_store = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
     adapter_mod._pending_research_captures.clear()
     adapter_mod._research_capture_counter = 0
+    adapter_mod._turn_seq = 0
 
 
 @pytest.fixture
@@ -2655,7 +2659,7 @@ class TestConstraintsInjection:
             },
         })
 
-        msg = adapter_mod._build_constraints_message()
+        msg, meta = adapter_mod._build_constraints_message()
         assert msg is not None
         assert msg["role"] == "system"
         assert "[CONSTRAINTS" in msg["content"]
@@ -2664,6 +2668,7 @@ class TestConstraintsInjection:
         assert "voice: dry, wry" in msg["content"]
         assert "bans: studies show" in msg["content"]
         assert "[/CONSTRAINTS]" in msg["content"]
+        assert meta["mode"] == "code"
 
         # Clean up
         adapter_mod._project_store = None
@@ -2695,7 +2700,7 @@ class TestConstraintsInjection:
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": "Hello"},
         ]
-        msg = adapter_mod._build_constraints_message()
+        msg, meta = adapter_mod._build_constraints_message()
         assert msg is not None
 
         insert_idx = 0
@@ -2734,7 +2739,7 @@ class TestConstraintsInjection:
             "description": "test",
         })
 
-        msg = adapter_mod._build_constraints_message()
+        msg, meta = adapter_mod._build_constraints_message()
         assert msg is None  # No constraints, no config
 
         adapter_mod._project_store = None
@@ -2746,8 +2751,9 @@ class TestConstraintsInjection:
 
         old_mode = adapter_mod.GOVERNOR_MODE
         adapter_mod.GOVERNOR_MODE = "general"
-        msg = adapter_mod._build_constraints_message()
+        msg, meta = adapter_mod._build_constraints_message()
         assert msg is None
+        assert meta["mode"] == "general"
         adapter_mod.GOVERNOR_MODE = old_mode
 
     def test_raw_constraints_fallback(self, tmp_contexts_dir) -> None:
@@ -2771,12 +2777,483 @@ class TestConstraintsInjection:
             "constraints": ["No pandas", "Handle UTF-8"],
         })
 
-        msg = adapter_mod._build_constraints_message()
+        msg, meta = adapter_mod._build_constraints_message()
         assert msg is not None
         assert msg["role"] == "system"
         assert "[CONSTRAINTS]" in msg["content"]
         assert "No pandas" in msg["content"]
         assert "Handle UTF-8" in msg["content"]
+        assert meta["mode"] == "code"
 
         adapter_mod._project_store = None
         adapter_mod._context_manager = None
+
+
+# ============================================================================
+# Receipt tests
+# ============================================================================
+
+
+class TestReceipt:
+    """Tests for per-turn receipt in SSE and non-streaming responses."""
+
+    def _make_mock_daemon(self, content="Hello from test", model="test-model",
+                          usage=None, footer=None, pending=None):
+        mock = AsyncMock()
+        mock.chat_send = AsyncMock(return_value={
+            "content": content,
+            "model": model,
+            "usage": usage or {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+            "violations": [],
+            "footer": footer,
+            "pending": pending,
+        })
+        mock.connect = AsyncMock()
+        mock.close = AsyncMock()
+        return mock
+
+    def test_receipt_in_streaming_first_and_done_chunks(self, client) -> None:
+        """Receipt appears in both the first SSE chunk and the done chunk."""
+        import gov_webui.adapter as adapter_mod
+
+        async def mock_stream(*args, **kwargs):
+            yield ("Hello ", None)
+            yield ("world", None)
+            yield (None, {
+                "content": "Hello world",
+                "model": "test-model",
+                "usage": {},
+                "violations": [],
+                "footer": None,
+                "pending": None,
+            })
+
+        mock = AsyncMock()
+        mock.chat_stream = MagicMock(return_value=mock_stream())
+        mock.connect = AsyncMock()
+        adapter_mod._daemon_client = mock
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": True,
+            },
+        )
+        assert response.status_code == 200
+
+        # Parse SSE chunks to find receipts
+        chunks_with_receipt = []
+        for line in response.text.split("\n"):
+            line = line.strip()
+            if not line.startswith("data: ") or line == "data: [DONE]":
+                continue
+            parsed = json.loads(line[6:])
+            if "receipt" in parsed:
+                chunks_with_receipt.append(parsed)
+
+        # Should have receipt in first chunk and done chunk
+        assert len(chunks_with_receipt) >= 2
+        first_receipt = chunks_with_receipt[0]["receipt"]
+        done_receipt = chunks_with_receipt[-1]["receipt"]
+
+        # Both receipts have required fields
+        for r in (first_receipt, done_receipt):
+            assert "constraints_hash" in r
+            assert "config_hash" in r
+            assert "mode" in r
+            assert "model" in r
+            assert "turn_id" in r
+            assert "turn_seq" in r
+            assert "request_id" in r
+            assert r["constraints_format_version"] == 1
+            assert r["rendered_by"] == "adapter"
+
+    def test_receipt_constraints_hash_correctness(self, tmp_contexts_dir) -> None:
+        """constraints_hash matches SHA-256[:16] of the constraints block content."""
+        import hashlib
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._project_store = None
+        adapter_mod._research_project_store = None
+        adapter_mod.GOVERNOR_MODE = "code"
+        adapter_mod.GOVERNOR_CONTEXTS_DIR = str(tmp_contexts_dir)
+        adapter_mod.GOVERNOR_CONTEXT_ID = "receipt-hash-test"
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("receipt-hash-test", mode="code")
+        adapter_mod._context_manager = cm
+
+        from fastapi.testclient import TestClient
+        test_client = TestClient(adapter_mod.app, raise_server_exceptions=False)
+
+        test_client.put("/governor/code/project/contract", json={
+            "description": "test",
+            "config": {
+                "artifact_type": "tool",
+                "length": "medium",
+                "strict": False,
+            },
+        })
+
+        msg, meta = adapter_mod._build_constraints_message()
+        assert msg is not None
+
+        # Compute expected hash
+        expected_full = hashlib.sha256(msg["content"].encode("utf-8")).hexdigest()
+        expected_short = expected_full[:16]
+
+        # Build receipt and verify
+        receipt = adapter_mod._build_receipt(
+            msg, meta, "req-1", "turn-1", 1, "test-model"
+        )
+        assert receipt["constraints_hash"] == expected_short
+        assert receipt["constraints_hash_full"] == expected_full
+
+        adapter_mod._project_store = None
+        adapter_mod._context_manager = None
+
+    def test_receipt_no_constraints_in_general_mode(self, client) -> None:
+        """In general mode, constraints_hash is None, mode is 'general'."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._daemon_client = self._make_mock_daemon()
+        adapter_mod.GOVERNOR_MODE = "general"
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        receipt = data.get("receipt")
+        assert receipt is not None
+        assert receipt["constraints_hash"] is None
+        assert receipt["mode"] == "general"
+
+    def test_receipt_strict_flag(self, tmp_contexts_dir) -> None:
+        """When config.strict = True, receipt.strict is True."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._project_store = None
+        adapter_mod._research_project_store = None
+        adapter_mod.GOVERNOR_MODE = "code"
+        adapter_mod.GOVERNOR_CONTEXTS_DIR = str(tmp_contexts_dir)
+        adapter_mod.GOVERNOR_CONTEXT_ID = "strict-test"
+
+        cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+        cm.create("strict-test", mode="code")
+        adapter_mod._context_manager = cm
+
+        from fastapi.testclient import TestClient
+        test_client = TestClient(adapter_mod.app, raise_server_exceptions=False)
+
+        test_client.put("/governor/code/project/contract", json={
+            "description": "test",
+            "config": {
+                "artifact_type": "tool",
+                "length": "short",
+                "strict": True,
+            },
+        })
+
+        msg, meta = adapter_mod._build_constraints_message()
+        assert msg is not None
+        assert meta["strict"] is True
+
+        receipt = adapter_mod._build_receipt(
+            msg, meta, "req-1", "turn-1", 1, "test-model"
+        )
+        assert receipt["strict"] is True
+
+        adapter_mod._project_store = None
+        adapter_mod._context_manager = None
+
+    def test_receipt_in_non_streaming_response(self, client) -> None:
+        """Non-streaming response includes receipt field."""
+        import gov_webui.adapter as adapter_mod
+
+        adapter_mod._daemon_client = self._make_mock_daemon()
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "receipt" in data
+        receipt = data["receipt"]
+        assert receipt["model"] == "test-model"
+        assert receipt["turn_seq"] >= 1
+        assert receipt["turn_id"].startswith("turn-")
+        assert receipt["request_id"].startswith("chatcmpl-")
+
+
+# ============================================================================
+# Artifact Engine Tests
+# ============================================================================
+
+
+class FakeArtifactStore:
+    """In-memory artifact store for adapter endpoint tests."""
+
+    def __init__(self):
+        from gov_webui.artifact_store import (
+            ArtifactMeta,
+            ArtifactNotFoundError,
+            ArtifactSummary,
+            ArtifactValidationError,
+            ArtifactVersion,
+            ArtifactVersionNotFoundError,
+            StaleArtifactVersionError,
+        )
+        self._NotFound = ArtifactNotFoundError
+        self._VersionNotFound = ArtifactVersionNotFoundError
+        self._Stale = StaleArtifactVersionError
+        self._Validation = ArtifactValidationError
+        self._Meta = ArtifactMeta
+        self._Version = ArtifactVersion
+        self._Summary = ArtifactSummary
+
+        self._artifacts = {}   # id -> {meta, versions_content}
+        self._index_version = 1
+
+    def create(self, *, title, content, kind="text", language="",
+               message_id=None, source="manual"):
+        if kind not in ("text", "markdown", "code"):
+            raise self._Validation(f"Invalid kind '{kind}'")
+        aid = f"fake{len(self._artifacts):04d}"
+        now = "2026-02-21T00:00:00+00:00"
+        ver = self._Version(
+            version=1, created_at=now, content_hash="abcd1234abcd1234",
+            source=source, message_id=message_id,
+        )
+        meta = self._Meta(
+            id=aid, title=title, kind=kind, language=language,
+            current_version=1, versions=[ver], created_at=now, updated_at=now,
+        )
+        self._artifacts[aid] = {"meta": meta, "content": {1: content}}
+        self._index_version += 1
+        return meta, content, self._index_version
+
+    def update(self, artifact_id, *, content, title=None,
+               expected_current_version=None, source="manual", message_id=None):
+        if artifact_id not in self._artifacts:
+            raise self._NotFound(artifact_id)
+        entry = self._artifacts[artifact_id]
+        meta = entry["meta"]
+        if (expected_current_version is not None
+                and expected_current_version != meta.current_version):
+            raise self._Stale(
+                artifact_id, expected_current_version,
+                meta.current_version, self._index_version,
+            )
+        now = "2026-02-21T00:00:01+00:00"
+        new_ver = meta.current_version + 1
+        ver = self._Version(
+            version=new_ver, created_at=now, content_hash="efgh5678efgh5678",
+            source=source, message_id=message_id,
+        )
+        meta.current_version = new_ver
+        meta.versions.append(ver)
+        meta.updated_at = now
+        if title is not None:
+            meta.title = title
+        entry["content"][new_ver] = content
+        self._index_version += 1
+        return meta, content, self._index_version
+
+    def get(self, artifact_id):
+        if artifact_id not in self._artifacts:
+            raise self._NotFound(artifact_id)
+        entry = self._artifacts[artifact_id]
+        meta = entry["meta"]
+        content = entry["content"][meta.current_version]
+        return meta, content, self._index_version
+
+    def get_version(self, artifact_id, version):
+        if artifact_id not in self._artifacts:
+            raise self._NotFound(artifact_id)
+        entry = self._artifacts[artifact_id]
+        if version not in entry["content"]:
+            raise self._VersionNotFound(artifact_id, version)
+        return entry["content"][version]
+
+    def list_all(self):
+        summaries = [
+            self._Summary(
+                id=m["meta"].id, title=m["meta"].title, kind=m["meta"].kind,
+                language=m["meta"].language,
+                current_version=m["meta"].current_version,
+                created_at=m["meta"].created_at, updated_at=m["meta"].updated_at,
+            )
+            for m in self._artifacts.values()
+        ]
+        summaries.sort(key=lambda s: s.updated_at, reverse=True)
+        return summaries, self._index_version
+
+    def delete(self, artifact_id):
+        if artifact_id not in self._artifacts:
+            raise self._NotFound(artifact_id)
+        del self._artifacts[artifact_id]
+        self._index_version += 1
+        return True, self._index_version
+
+    def get_state(self):
+        return {
+            "version": self._index_version,
+            "updated_at": "2026-02-21T00:00:00+00:00",
+            "count": len(self._artifacts),
+        }
+
+    def exists(self, artifact_id):
+        return artifact_id in self._artifacts
+
+
+@pytest.fixture
+def fake_artifact_store(app, monkeypatch):
+    """Inject FakeArtifactStore into the adapter module."""
+    import gov_webui.adapter as adapter_mod
+    fake = FakeArtifactStore()
+    monkeypatch.setattr(adapter_mod, "_artifact_store", fake)
+    return fake
+
+
+@pytest.fixture
+def art_client(client, fake_artifact_store):
+    """Test client with fake artifact store injected."""
+    return client
+
+
+def test_artifacts_list_returns_metadata_only(art_client, fake_artifact_store):
+    fake_artifact_store.create(title="Note", content="hello", kind="text")
+    resp = art_client.get("/governor/artifacts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert len(data["artifacts"]) == 1
+    assert data["artifacts"][0]["title"] == "Note"
+    assert "content" not in data["artifacts"][0]
+    assert "versions" not in data["artifacts"][0]
+
+
+def test_artifacts_create_returns_detail_and_content(art_client):
+    resp = art_client.post("/governor/artifacts", json={
+        "title": "My Draft", "content": "Draft body", "kind": "markdown",
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["artifact"]["title"] == "My Draft"
+    assert data["artifact"]["kind"] == "markdown"
+    assert data["content"] == "Draft body"
+    assert "versions" in data["artifact"]
+    assert data["index_version"] >= 2
+
+
+def test_artifacts_create_validation_error_shape(art_client):
+    resp = art_client.post("/governor/artifacts", json={
+        "title": "Bad", "content": "x", "kind": "spreadsheet",
+    })
+    assert resp.status_code == 422
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["error"]["code"] == "validation_error"
+
+
+def test_artifacts_get_returns_detail(art_client, fake_artifact_store):
+    meta, _, _ = fake_artifact_store.create(title="Get Me", content="body", kind="text")
+    resp = art_client.get(f"/governor/artifacts/{meta.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["artifact"]["title"] == "Get Me"
+    assert data["content"] == "body"
+
+
+def test_artifacts_get_not_found(art_client):
+    resp = art_client.get("/governor/artifacts/doesnotexist")
+    assert resp.status_code == 404
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["error"]["code"] == "artifact_not_found"
+
+
+def test_artifacts_update_bumps_version(art_client, fake_artifact_store):
+    meta, _, _ = fake_artifact_store.create(title="Upd", content="v1", kind="text")
+    resp = art_client.put(f"/governor/artifacts/{meta.id}", json={
+        "content": "v2 content", "expected_current_version": 1,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["artifact"]["current_version"] == 2
+    assert data["content"] == "v2 content"
+
+
+def test_artifacts_update_stale_returns_409(art_client, fake_artifact_store):
+    meta, _, _ = fake_artifact_store.create(title="Stale", content="v1", kind="text")
+    fake_artifact_store.update(meta.id, content="v2", expected_current_version=1)
+
+    resp = art_client.put(f"/governor/artifacts/{meta.id}", json={
+        "content": "v3", "expected_current_version": 1,
+    })
+    assert resp.status_code == 409
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["error"]["code"] == "stale_version"
+    details = data["error"]["details"]
+    assert details["artifact_id"] == meta.id
+    assert details["expected_current_version"] == 1
+    assert details["current_version"] == 2
+    assert "index_version" in details
+
+
+def test_artifacts_delete_returns_deleted_payload(art_client, fake_artifact_store):
+    meta, _, _ = fake_artifact_store.create(title="Del", content="bye", kind="text")
+    resp = art_client.delete(f"/governor/artifacts/{meta.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["deleted"]["artifact_id"] == meta.id
+
+
+def test_artifacts_get_specific_version(art_client, fake_artifact_store):
+    meta, _, _ = fake_artifact_store.create(title="Ver", content="v1", kind="text")
+    fake_artifact_store.update(meta.id, content="v2", expected_current_version=1)
+
+    resp = art_client.get(f"/governor/artifacts/{meta.id}/version/1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["content"] == "v1"
+    assert data["version"] == 1
+
+
+def test_artifacts_get_specific_version_not_found(art_client, fake_artifact_store):
+    meta, _, _ = fake_artifact_store.create(title="Ver", content="v1", kind="text")
+    resp = art_client.get(f"/governor/artifacts/{meta.id}/version/99")
+    assert resp.status_code == 404
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["error"]["code"] == "artifact_version_not_found"
+
+
+def test_artifacts_state_endpoint(art_client, fake_artifact_store):
+    fake_artifact_store.create(title="A", content="a", kind="text")
+    resp = art_client.get("/governor/artifacts/state")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["count"] == 1
+    assert "index_version" in data
+    assert "updated_at" in data

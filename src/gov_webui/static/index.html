@@ -207,6 +207,40 @@
     white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto;
     border: 1px solid var(--border); }
 
+  /* Artifact Panel */
+  .artifact-panel { display: flex; flex-direction: column; overflow-y: auto; padding: 1rem; min-height: 0; }
+  .artifact-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.4rem; }
+  .artifact-panel-header h2 { font-size: 1rem; font-weight: 600; }
+  .artifact-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .artifact-list-item { padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--card-bg); cursor: pointer; display: flex; flex-direction: column; gap: 0.25rem; }
+  .artifact-list-item:hover { border-color: var(--accent); }
+  .artifact-list-item .artifact-item-title { font-size: 0.85rem; font-weight: 600; }
+  .artifact-list-item .artifact-item-meta { display: flex; gap: 0.5rem; font-size: 0.7rem; color: var(--muted); }
+  .artifact-kind-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 4px;
+    font-size: 0.65rem; font-weight: 600; background: var(--accent-light); color: var(--accent); }
+  .artifact-editor-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 0.75rem; }
+  .artifact-editor-tabs button { background: none; border: none; padding: 0.5rem 0.75rem;
+    font-size: 0.8rem; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+  .artifact-editor-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .artifact-editor-area { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .artifact-editor-area textarea { flex: 1; width: 100%; font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.8rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card-bg); color: var(--fg); resize: none; line-height: 1.5; min-height: 200px; }
+  .artifact-preview { flex: 1; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card-bg); overflow-y: auto; font-size: 0.85rem; line-height: 1.6; min-height: 200px; }
+  .artifact-editor-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center; }
+  .artifact-dirty-badge { font-size: 0.7rem; color: var(--badge-warn); font-weight: 600; }
+  .version-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 200px; overflow-y: auto; }
+  .version-item { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem;
+    padding: 0.3rem 0.5rem; border-radius: 4px; cursor: pointer; }
+  .version-item:hover { background: var(--accent-light); }
+  .version-item.current { font-weight: 600; }
+  .promote-artifact-btn { display: inline-block; margin-top: 0.3rem; padding: 0.15rem 0.5rem;
+    font-size: 0.68rem; border: 1px solid var(--border); border-radius: 12px; background: var(--card-bg);
+    color: var(--muted); cursor: pointer; }
+  .promote-artifact-btn:hover { border-color: var(--accent); color: var(--accent); }
+
   /* Sidebar toggle for mobile */
   .sidebar-toggle { display: none; position: fixed; bottom: 1rem; right: 1rem; width: 48px; height: 48px; border-radius: 50%; background: var(--accent); color: #fff; border: none; font-size: 1.2rem; cursor: pointer; z-index: 50; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
 
@@ -220,6 +254,8 @@
     .app { grid-template-columns: 1fr; }
     .governor-panel { display: none; position: fixed; top: 0; right: 0; bottom: 0; width: 340px; background: var(--bg); z-index: 60; border-left: 1px solid var(--border); box-shadow: -4px 0 20px rgba(0,0,0,0.1); }
     .governor-panel.open { display: flex; }
+    .artifact-panel { display: none; position: fixed; top: 0; right: 0; bottom: 0; width: 340px; background: var(--bg); z-index: 60; border-left: 1px solid var(--border); box-shadow: -4px 0 20px rgba(0,0,0,0.1); }
+    .artifact-panel.open { display: flex; }
     .sidebar-toggle { display: flex; align-items: center; justify-content: center; }
     .chat-panel { border-right: none; }
   }
@@ -233,6 +269,7 @@
     .toast.error { background: #7f1d1d; color: #fca5a5; border-color: #991b1b; }
     .toast.stale { background: #1e3a5f; color: #93c5fd; border-color: #2563eb; }
     .finding-item { color: #fca5a5; }
+    .turn-meta .receipt-badge.strict-on { background: #78350f; color: #fcd34d; }
   }
 
   /* Welcome state */
@@ -287,6 +324,9 @@
   .diff-collapse { cursor: pointer; color: var(--muted); font-size: 0.75rem; user-select: none; }
   .turn-meta { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; padding-top: 0.3rem; border-top: 1px solid var(--border); font-size: 0.7rem; color: var(--muted); }
   .turn-meta .file-badge { background: var(--accent-light); color: var(--accent); padding: 0.1rem 0.35rem; border-radius: 3px; font-weight: 500; }
+  .turn-meta .receipt-badge { background: var(--accent-light); color: var(--accent); padding: 0.1rem 0.35rem; border-radius: 3px; font-weight: 500; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.65rem; }
+  .turn-meta .receipt-badge.strict-on { background: #fef3c7; color: #92400e; }
+  .turn-meta .receipt-badge.no-constraints { background: transparent; color: var(--muted); font-style: italic; font-family: inherit; }
   .code-block-actions { display: flex; gap: 0.3rem; margin-top: 0.3rem; }
   .code-block-actions button { padding: 0.25rem 0.6rem; font-size: 0.75rem; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; background: var(--card-bg); color: var(--fg); }
   .code-block-actions button.accept-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -397,6 +437,7 @@
         <button data-val="maker" class="active">Maker</button>
         <button data-val="builder">Builder</button>
       </div>
+      <button class="gov-btn" onclick="showArtifactPanel()" style="font-size:0.72rem;padding:0.2rem 0.5rem;" title="Artifacts">Artifacts</button>
     </div>
 
     <!-- Status Banner -->
@@ -790,6 +831,52 @@
       <div class="card-body" id="corrections-list">
         <div class="empty">Nothing yet.<br>When I catch something, it'll show up here.</div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Artifact Panel (shares grid column with governor-panel, hidden by default) -->
+<div class="artifact-panel hidden" id="artifact-panel">
+  <div class="artifact-panel-header">
+    <h2>Artifacts</h2>
+    <div style="display:flex;gap:0.4rem;">
+      <button class="gov-btn" onclick="artifactNewDraft()" style="font-size:0.72rem;padding:0.2rem 0.5rem;">+ New</button>
+      <button class="gov-btn" onclick="hideArtifactPanel()" style="font-size:0.72rem;padding:0.2rem 0.5rem;">Back</button>
+    </div>
+  </div>
+
+  <!-- List view -->
+  <div id="artifact-list-view">
+    <div class="artifact-list" id="artifact-list">
+      <div class="empty" id="artifact-empty">No artifacts yet. Promote assistant text or create a new draft.</div>
+    </div>
+  </div>
+
+  <!-- Editor view (hidden by default) -->
+  <div id="artifact-editor-view" class="hidden" style="display:none;flex-direction:column;flex:1;min-height:0;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+      <input type="text" id="artifact-title-input" placeholder="Artifact title" style="flex:1;font-size:0.9rem;font-weight:600;border:none;border-bottom:1px solid var(--border);background:transparent;color:var(--fg);padding:0.25rem 0;">
+      <button class="gov-btn" onclick="artifactBackToList()" style="font-size:0.72rem;padding:0.2rem 0.5rem;margin-left:0.5rem;">List</button>
+    </div>
+    <div class="artifact-editor-tabs">
+      <button class="active" onclick="artifactSwitchTab('edit')" id="artifact-tab-edit">Edit</button>
+      <button onclick="artifactSwitchTab('preview')" id="artifact-tab-preview">Preview</button>
+      <button onclick="artifactSwitchTab('history')" id="artifact-tab-history">History</button>
+    </div>
+    <div class="artifact-editor-area" id="artifact-edit-pane">
+      <textarea id="artifact-content" oninput="artifactMarkDirty()"></textarea>
+    </div>
+    <div class="artifact-editor-area hidden" id="artifact-preview-pane" style="display:none;">
+      <div class="artifact-preview" id="artifact-preview-body"></div>
+    </div>
+    <div class="artifact-editor-area hidden" id="artifact-history-pane" style="display:none;">
+      <div class="version-list" id="artifact-version-list"></div>
+    </div>
+    <div class="artifact-editor-actions">
+      <button class="gov-btn primary" onclick="artifactSave()" id="artifact-save-btn">Save</button>
+      <button class="gov-btn" onclick="artifactDelete()" style="font-size:0.72rem;">Delete</button>
+      <span class="artifact-dirty-badge hidden" id="artifact-dirty-badge">unsaved</span>
+      <span style="margin-left:auto;font-size:0.7rem;color:var(--muted);" id="artifact-version-label"></span>
     </div>
   </div>
 </div>
@@ -1308,6 +1395,33 @@
   </div>
 </div>
 
+<!-- Promote to Artifact Modal -->
+<div class="modal-overlay" id="promote-artifact-modal">
+  <div class="modal">
+    <h3>Promote to Artifact</h3>
+    <div class="form-group">
+      <label>Title</label>
+      <input type="text" id="promote-artifact-title" placeholder="Artifact title" maxlength="200">
+    </div>
+    <div class="form-group">
+      <label>Kind</label>
+      <select id="promote-artifact-kind" style="width:100%;padding:0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:0.85rem;">
+        <option value="text">Text</option>
+        <option value="markdown" selected>Markdown</option>
+        <option value="code">Code</option>
+      </select>
+    </div>
+    <div class="form-group" id="promote-language-group" style="display:none;">
+      <label>Language</label>
+      <input type="text" id="promote-artifact-language" placeholder="e.g. python, javascript">
+    </div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('promote-artifact-modal')">Cancel</button>
+      <button class="gov-btn primary" onclick="submitPromoteArtifact()">Promote</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   var mode = 'general';
@@ -1658,6 +1772,8 @@
 
     var bubble = addMessage('assistant', '');
     _lastAssistantBubble = bubble;
+    _lastTurnId = null;
+    _lastReceipt = null;
     var accumulated = '';
 
     // Send full conversation history (multi-turn fix)
@@ -1718,6 +1834,7 @@
                 document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
               }
               if (parsed.turn_id) { _lastTurnId = parsed.turn_id; }
+              if (parsed.receipt) { _lastReceipt = parsed.receipt; }
               if (parsed.choices && parsed.choices[0] && parsed.choices[0].finish_reason) {
                 finishGeneration(accumulated);
                 return;
@@ -1749,6 +1866,35 @@
     }
     refreshGovernor();
 
+    // Attach receipt strip to assistant bubble
+    if (_lastAssistantBubble && _lastReceipt) {
+      var turnId = _lastTurnId || ('local-' + Date.now());
+      var metaStrip = document.createElement('div');
+      metaStrip.className = 'turn-meta';
+      metaStrip.setAttribute('data-turn-id', turnId);
+
+      var metaHtml = '';
+      var r = _lastReceipt;
+      if (r.constraints_hash) {
+        metaHtml += '<span class="receipt-badge" title="Config hash">' + esc(r.config_hash || '?') + '</span>';
+        metaHtml += '<span class="receipt-badge" title="Constraints block hash">' + esc(r.constraints_hash) + '</span>';
+        if (r.strict) {
+          metaHtml += '<span class="receipt-badge strict-on">strict</span>';
+        }
+      } else {
+        metaHtml += '<span class="receipt-badge no-constraints">no constraints</span>';
+      }
+      if (r.forced) {
+        metaHtml += '<span class="receipt-badge strict-on" title="Preflight bypassed">FORCED</span>';
+      }
+      if (r.mode) metaHtml += '<span class="receipt-badge">' + esc(r.mode) + '</span>';
+      if (r.model) metaHtml += '<span class="receipt-badge">' + esc(r.model) + '</span>';
+      if (r.turn_seq) metaHtml += '<span style="color:var(--muted);font-size:0.65rem;">#' + r.turn_seq + '</span>';
+
+      metaStrip.innerHTML = metaHtml;
+      _lastAssistantBubble.parentNode.appendChild(metaStrip);
+    }
+
     // Capture scan: scan for mode-specific captures
     if (mode === 'fiction' && _lastUserText) {
       scanForCaptures(_lastUserText, _lastAssistantBubble);
@@ -1763,6 +1909,288 @@
       extractCodeBlocks(content, _lastAssistantBubble);
     }
   }
+
+  // ========== Artifact Engine ==========
+
+  var _artifactList = [];
+  var _activeArtifactId = null;
+  var _artifactDirty = false;
+  var _artifactIndexVersion = 0;
+  var _promotingContent = '';
+  var _promotingMessageId = null;
+
+  window.showArtifactPanel = function() {
+    document.getElementById('governor-panel').classList.add('hidden');
+    var panel = document.getElementById('artifact-panel');
+    panel.classList.remove('hidden');
+    panel.classList.add('open');
+    artifactRefreshList();
+  };
+
+  window.hideArtifactPanel = function() {
+    if (_artifactDirty && !confirm('You have unsaved changes. Discard?')) return;
+    var panel = document.getElementById('artifact-panel');
+    panel.classList.add('hidden');
+    panel.classList.remove('open');
+    document.getElementById('governor-panel').classList.remove('hidden');
+    _activeArtifactId = null;
+    _artifactDirty = false;
+    artifactShowListView();
+  };
+
+  function artifactShowListView() {
+    document.getElementById('artifact-list-view').style.display = '';
+    var ev = document.getElementById('artifact-editor-view');
+    ev.style.display = 'none';
+    ev.classList.add('hidden');
+  }
+
+  function artifactShowEditorView() {
+    document.getElementById('artifact-list-view').style.display = 'none';
+    var ev = document.getElementById('artifact-editor-view');
+    ev.classList.remove('hidden');
+    ev.style.display = 'flex';
+  }
+
+  function artifactRefreshList() {
+    fetch(BASE + '/governor/artifacts').then(function(r) { return r.json(); }).then(function(data) {
+      if (!data.ok) return;
+      _artifactList = data.artifacts || [];
+      _artifactIndexVersion = data.index_version || 0;
+      renderArtifactList();
+    }).catch(function() {});
+  }
+
+  function renderArtifactList() {
+    var container = document.getElementById('artifact-list');
+    var empty = document.getElementById('artifact-empty');
+    if (_artifactList.length === 0) {
+      container.innerHTML = '';
+      container.appendChild(empty);
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    var html = '';
+    for (var i = 0; i < _artifactList.length; i++) {
+      var a = _artifactList[i];
+      html += '<div class="artifact-list-item" onclick="artifactOpen(\'' + a.id + '\')">'
+        + '<div class="artifact-item-title">' + escHtml(a.title) + '</div>'
+        + '<div class="artifact-item-meta">'
+        + '<span class="artifact-kind-badge">' + escHtml(a.kind) + '</span>'
+        + '<span>v' + a.current_version + '</span>'
+        + '</div></div>';
+    }
+    container.innerHTML = html;
+  }
+
+  function escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  window.artifactOpen = function(id) {
+    if (_artifactDirty && !confirm('You have unsaved changes. Discard?')) return;
+    fetch(BASE + '/governor/artifacts/' + id).then(function(r) { return r.json(); }).then(function(data) {
+      if (!data.ok) return;
+      _activeArtifactId = id;
+      _artifactDirty = false;
+      var meta = data.artifact;
+      document.getElementById('artifact-title-input').value = meta.title;
+      document.getElementById('artifact-content').value = data.content;
+      document.getElementById('artifact-version-label').textContent = 'v' + meta.current_version + ' \u00b7 ' + meta.kind;
+      document.getElementById('artifact-dirty-badge').classList.add('hidden');
+      renderArtifactVersions(meta.versions || []);
+      artifactSwitchTab('edit');
+      artifactShowEditorView();
+    }).catch(function() {});
+  };
+
+  function renderArtifactVersions(versions) {
+    var container = document.getElementById('artifact-version-list');
+    if (!versions.length) { container.innerHTML = '<div class="empty">No version history.</div>'; return; }
+    var html = '';
+    for (var i = versions.length - 1; i >= 0; i--) {
+      var v = versions[i];
+      var cls = (i === versions.length - 1) ? 'version-item current' : 'version-item';
+      html += '<div class="' + cls + '" onclick="artifactLoadVersion(\'' + _activeArtifactId + '\',' + v.version + ')">'
+        + '<span>v' + v.version + ' <small>(' + v.source + ')</small></span>'
+        + '<span style="color:var(--muted);font-size:0.65rem;">' + (v.created_at || '').slice(0, 19) + '</span>'
+        + '</div>';
+    }
+    container.innerHTML = html;
+  }
+
+  window.artifactLoadVersion = function(id, version) {
+    if (_artifactDirty && !confirm('You have unsaved changes. Load this version?')) return;
+    fetch(BASE + '/governor/artifacts/' + id + '/version/' + version).then(function(r) { return r.json(); }).then(function(data) {
+      if (!data.ok) return;
+      document.getElementById('artifact-content').value = data.content;
+      _artifactDirty = false;
+      document.getElementById('artifact-dirty-badge').classList.add('hidden');
+      artifactSwitchTab('edit');
+    }).catch(function() {});
+  };
+
+  window.artifactSwitchTab = function(tab) {
+    var tabs = ['edit', 'preview', 'history'];
+    for (var i = 0; i < tabs.length; i++) {
+      var pane = document.getElementById('artifact-' + tabs[i] + '-pane');
+      var btn = document.getElementById('artifact-tab-' + tabs[i]);
+      if (tabs[i] === tab) {
+        pane.classList.remove('hidden');
+        pane.style.display = '';
+        btn.classList.add('active');
+      } else {
+        pane.classList.add('hidden');
+        pane.style.display = 'none';
+        btn.classList.remove('active');
+      }
+    }
+    if (tab === 'preview') {
+      var content = document.getElementById('artifact-content').value;
+      document.getElementById('artifact-preview-body').innerHTML = renderMarkdown(content);
+    }
+  };
+
+  window.artifactMarkDirty = function() {
+    _artifactDirty = true;
+    document.getElementById('artifact-dirty-badge').classList.remove('hidden');
+  };
+
+  window.artifactSave = function() {
+    if (!_activeArtifactId) return;
+    var content = document.getElementById('artifact-content').value;
+    var title = document.getElementById('artifact-title-input').value.trim();
+    fetch(BASE + '/governor/artifacts/' + _activeArtifactId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: content, title: title || undefined, source: 'edit' }),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (!data.ok) {
+        if (data.error && data.error.code === 'stale_version') {
+          alert('Conflict: artifact was updated elsewhere. Please reload.');
+        }
+        return;
+      }
+      _artifactDirty = false;
+      document.getElementById('artifact-dirty-badge').classList.add('hidden');
+      var meta = data.artifact;
+      document.getElementById('artifact-version-label').textContent = 'v' + meta.current_version + ' \u00b7 ' + meta.kind;
+      renderArtifactVersions(meta.versions || []);
+      artifactRefreshList();
+    }).catch(function() {});
+  };
+
+  window.artifactDelete = function() {
+    if (!_activeArtifactId) return;
+    if (!confirm('Delete this artifact?')) return;
+    fetch(BASE + '/governor/artifacts/' + _activeArtifactId, { method: 'DELETE' })
+      .then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) return;
+        _activeArtifactId = null;
+        _artifactDirty = false;
+        artifactShowListView();
+        artifactRefreshList();
+      }).catch(function() {});
+  };
+
+  window.artifactBackToList = function() {
+    if (_artifactDirty && !confirm('You have unsaved changes. Discard?')) return;
+    _activeArtifactId = null;
+    _artifactDirty = false;
+    artifactShowListView();
+    artifactRefreshList();
+  };
+
+  window.artifactNewDraft = function() {
+    if (_artifactDirty && !confirm('You have unsaved changes. Discard?')) return;
+    fetch(BASE + '/governor/artifacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Untitled', content: '', kind: 'text', source: 'manual' }),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (!data.ok) return;
+      artifactRefreshList();
+      artifactOpen(data.artifact.id);
+    }).catch(function() {});
+  };
+
+  // Promote flow
+  window.promoteToArtifact = function(content, messageId) {
+    _promotingContent = content;
+    _promotingMessageId = messageId || null;
+    document.getElementById('promote-artifact-title').value = '';
+    document.getElementById('promote-artifact-kind').value = 'markdown';
+    document.getElementById('promote-language-group').style.display = 'none';
+    openModal('promote-artifact-modal');
+  };
+
+  // Show/hide language field based on kind
+  (function() {
+    var kindSelect = document.getElementById('promote-artifact-kind');
+    if (kindSelect) {
+      kindSelect.addEventListener('change', function() {
+        document.getElementById('promote-language-group').style.display =
+          this.value === 'code' ? '' : 'none';
+      });
+    }
+  })();
+
+  window.submitPromoteArtifact = function() {
+    var title = document.getElementById('promote-artifact-title').value.trim();
+    if (!title) { alert('Title is required.'); return; }
+    var kind = document.getElementById('promote-artifact-kind').value;
+    var language = document.getElementById('promote-artifact-language').value.trim();
+
+    fetch(BASE + '/governor/artifacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: title,
+        content: _promotingContent,
+        kind: kind,
+        language: language,
+        source: 'promote',
+        message_id: _promotingMessageId,
+      }),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (!data.ok) {
+        alert('Failed to create artifact: ' + (data.error ? data.error.message : 'unknown'));
+        return;
+      }
+      closeModal('promote-artifact-modal');
+      _promotingContent = '';
+      _promotingMessageId = null;
+      showArtifactPanel();
+      artifactOpen(data.artifact.id);
+    }).catch(function() {});
+  };
+
+  // Add promote buttons to assistant bubbles
+  function addPromoteButton(bubble, content) {
+    if (bubble.querySelector('.promote-artifact-btn')) return;
+    var btn = document.createElement('button');
+    btn.className = 'promote-artifact-btn';
+    btn.textContent = 'Promote to artifact';
+    btn.onclick = function(e) {
+      e.stopPropagation();
+      var msgId = bubble.getAttribute('data-message-id') || '';
+      promoteToArtifact(content, msgId);
+    };
+    bubble.appendChild(btn);
+  }
+
+  // Patch addMessage to attach promote buttons on assistant bubbles
+  var _origAddMessage = addMessage;
+  addMessage = function(role, content) {
+    var bubble = _origAddMessage(role, content);
+    if (role === 'assistant') {
+      addPromoteButton(bubble, content);
+    }
+    return bubble;
+  };
 
   // Textarea auto-resize and enter-to-send
   var inputEl = document.getElementById('input');
@@ -1968,6 +2396,7 @@
   // ========== Code Builder Render ==========
 
   var _lastTurnId = null;
+  var _lastReceipt = null;
   var _pendingCodeBlocks = {};  // turnId -> [{code, lang}]
   var _projectState = null;
 
@@ -3636,12 +4065,14 @@
       })(i, acceptFn);
     }
 
-    // Add turn meta strip
-    var metaStrip = document.createElement('div');
-    metaStrip.className = 'turn-meta';
-    metaStrip.setAttribute('data-turn-id', turnId);
-    metaStrip.innerHTML = '<span style="color:var(--muted);">Turn: ' + esc(turnId) + '</span>';
-    bubble.parentNode.appendChild(metaStrip);
+    // Ensure turn meta strip exists (may already be created by finishGeneration receipt)
+    if (!document.querySelector('.turn-meta[data-turn-id="' + turnId + '"]')) {
+      var metaStrip = document.createElement('div');
+      metaStrip.className = 'turn-meta';
+      metaStrip.setAttribute('data-turn-id', turnId);
+      metaStrip.innerHTML = '<span style="color:var(--muted);">Turn: ' + esc(turnId) + '</span>';
+      bubble.parentNode.appendChild(metaStrip);
+    }
   }
 
   var _acceptingBlockTurnId = null;

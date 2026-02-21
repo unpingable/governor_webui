@@ -30,6 +30,7 @@ The codex backend uses your ChatGPT subscription instead of API credits.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -182,6 +183,7 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: list[ChatCompletionChoice]
     usage: Usage | None = None
+    receipt: dict | None = None
 
 
 class ModelInfo(BaseModel):
@@ -415,29 +417,36 @@ _LENGTH_BANDS = {
     "long": (2000, 10000),
 }
 
+CONSTRAINTS_FMT_VER = 1
+_turn_seq = 0
 
-def _build_constraints_message() -> dict[str, str] | None:
+
+def _build_constraints_message() -> tuple[dict[str, str] | None, dict]:
     """Build a system message from the active project's config constraints.
 
-    Returns a {"role": "system", "content": ...} dict, or None if nothing to inject.
+    Returns (constraints_msg, contract_meta) where constraints_msg is
+    {"role": "system", "content": ...} or None, and contract_meta has
+    config_hash, config_hash_full, strict, mode for receipt building.
     Only applies in code or research modes.
     """
     mode = GOVERNOR_MODE
+    _meta_base = {"mode": mode, "strict": False}
     if mode not in ("code", "research"):
-        return None
+        return None, _meta_base
 
     try:
         store = _get_project_store() if mode == "code" else _get_research_project_store()
         state = store.get_state()
         contract = state.get("contract", {})
-    except Exception:
-        return None
+    except Exception as e:
+        return None, {**_meta_base, "receipt_error": f"store_read_failed: {e}"}
 
     config = contract.get("config")
     if config:
         # Build typed constraints block from config
         lines = []
         hash_tag = contract.get("config_hash", "")
+        hash_full = contract.get("config_hash_full", "")
         lines.append(f"[CONSTRAINTS config_hash={hash_tag}]")
 
         if config.get("artifact_type"):
@@ -480,15 +489,64 @@ def _build_constraints_message() -> dict[str, str] | None:
         lines.append(f"strict: {str(strict).lower()}")
 
         lines.append("[/CONSTRAINTS]")
-        return {"role": "system", "content": "\n".join(lines)}
+        meta = {
+            "config_hash": hash_tag or None,
+            "config_hash_full": hash_full or None,
+            "strict": strict,
+            "mode": mode,
+        }
+        return {"role": "system", "content": "\n".join(lines)}, meta
 
     # Fallback: raw constraints list
     constraints = contract.get("constraints", [])
     if constraints:
         block = "[CONSTRAINTS]\n" + "\n".join(constraints) + "\n[/CONSTRAINTS]"
-        return {"role": "system", "content": block}
+        meta = {
+            "config_hash": contract.get("config_hash"),
+            "config_hash_full": contract.get("config_hash_full"),
+            "strict": False,
+            "mode": mode,
+        }
+        return {"role": "system", "content": block}, meta
 
-    return None
+    return None, _meta_base
+
+
+def _build_receipt(
+    constraints_msg: dict[str, str] | None,
+    contract_meta: dict,
+    request_id: str,
+    turn_id: str,
+    turn_seq: int,
+    resolved_model: str,
+) -> dict:
+    """Build a per-turn receipt proving constraints reached the model."""
+    constraints_hash = None
+    constraints_hash_full = None
+    if constraints_msg:
+        raw = constraints_msg["content"].encode("utf-8")
+        full = hashlib.sha256(raw).hexdigest()
+        constraints_hash = full[:16]
+        constraints_hash_full = full
+
+    receipt: dict = {
+        "config_hash": contract_meta.get("config_hash"),
+        "config_hash_full": contract_meta.get("config_hash_full"),
+        "constraints_hash": constraints_hash,
+        "constraints_hash_full": constraints_hash_full,
+        "constraints_format_version": CONSTRAINTS_FMT_VER,
+        "rendered_by": "adapter",
+        "mode": contract_meta.get("mode", GOVERNOR_MODE),
+        "strict": contract_meta.get("strict", False),
+        "forced": False,  # chat path always injects; reserved for future preflight bypass
+        "model": resolved_model,
+        "request_id": request_id,
+        "turn_id": turn_id,
+        "turn_seq": turn_seq,
+    }
+    if contract_meta.get("receipt_error"):
+        receipt["receipt_error"] = contract_meta["receipt_error"]
+    return receipt
 
 
 @app.post("/v1/chat/completions", response_model=None)
@@ -500,11 +558,12 @@ async def chat_completions(
     Delegates to the governor daemon for the full governed pipeline:
     pending check → augment → generate → check → receipt.
     """
+    global _turn_seq
     client = _get_daemon_client()
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     # Inject constraints after last system message
-    constraints_msg = _build_constraints_message()
+    constraints_msg, contract_meta = _build_constraints_message()
     if constraints_msg:
         insert_idx = 0
         for i, m in enumerate(messages):
@@ -514,7 +573,8 @@ async def chat_completions(
 
     if request.stream:
         return StreamingResponse(
-            _stream_via_daemon(client, messages, request.model, GOVERNOR_CONTEXT_ID),
+            _stream_via_daemon(client, messages, request.model, GOVERNOR_CONTEXT_ID,
+                               constraints_msg, contract_meta),
             media_type="text/event-stream",
         )
 
@@ -545,11 +605,19 @@ async def chat_completions(
     if footer:
         content = f"{content}\n\n{footer}"
 
+    # Build receipt with resolved model from daemon
+    resolved_model = result.get("model", request.model)
+    request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+    _turn_seq += 1
+    turn_id = f"turn-{uuid.uuid4().hex[:12]}"
+    receipt = _build_receipt(constraints_msg, contract_meta,
+                             request_id, turn_id, _turn_seq, resolved_model)
+
     usage_data = result.get("usage") or {}
     return ChatCompletionResponse(
-        id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
+        id=request_id,
         created=int(time.time()),
-        model=result.get("model", request.model),
+        model=resolved_model,
         choices=[
             ChatCompletionChoice(
                 index=0,
@@ -562,6 +630,7 @@ async def chat_completions(
             completion_tokens=usage_data.get("completion_tokens", 0),
             total_tokens=usage_data.get("total_tokens", 0),
         ),
+        receipt=receipt,
     )
 
 
@@ -570,12 +639,32 @@ async def _stream_via_daemon(
     messages: list[dict[str, str]],
     model: str,
     context_id: str,
+    constraints_msg: dict[str, str] | None = None,
+    contract_meta: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream response via daemon in OpenAI SSE format."""
+    global _turn_seq
     request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
     final_result: dict | None = None
 
+    # Build receipt before streaming so first chunk carries it
+    _turn_seq += 1
+    turn_id = f"turn-{uuid.uuid4().hex[:12]}"
+    receipt = _build_receipt(constraints_msg, contract_meta or {},
+                             request_id, turn_id, _turn_seq, model)
+
     try:
+        # Emit receipt as first chunk (before content)
+        first_chunk = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+            "receipt": receipt,
+        }
+        yield f"data: {json.dumps(first_chunk)}\n\n"
+
         async for delta, final in client.chat_stream(
             messages=messages, model=model, context_id=context_id
         ):
@@ -596,6 +685,10 @@ async def _stream_via_daemon(
                 yield f"data: {json.dumps(sse_chunk)}\n\n"
             if final is not None:
                 final_result = final
+
+        # Update receipt with resolved model from daemon if available
+        if final_result and final_result.get("model"):
+            receipt["model"] = final_result["model"]
 
         # If daemon returned a pending violation, emit it as a final chunk
         if final_result and final_result.get("pending"):
@@ -635,8 +728,7 @@ async def _stream_via_daemon(
             }
             yield f"data: {json.dumps(sse_chunk)}\n\n"
 
-        # Final done chunk — includes turn_id for code builder
-        turn_id = f"turn-{uuid.uuid4().hex[:12]}"
+        # Final done chunk — includes turn_id + receipt for code builder
         done_chunk = {
             "id": request_id,
             "object": "chat.completion.chunk",
@@ -650,6 +742,7 @@ async def _stream_via_daemon(
                 }
             ],
             "turn_id": turn_id,
+            "receipt": receipt,
         }
         yield f"data: {json.dumps(done_chunk)}\n\n"
         yield "data: [DONE]\n\n"
@@ -1110,6 +1203,21 @@ def _get_research_project_store() -> Any:
     return _research_project_store
 
 
+_artifact_store: Any = None
+
+
+def _get_artifact_store() -> Any:
+    """Lazy-init artifact store."""
+    global _artifact_store
+    if _artifact_store is None:
+        from gov_webui.artifact_store import ArtifactStore
+
+        cm = _get_context_manager()
+        ctx = cm.get_or_create(GOVERNOR_CONTEXT_ID, mode=GOVERNOR_MODE)
+        _artifact_store = ArtifactStore(ctx.governor_dir)
+    return _artifact_store
+
+
 class CaptureRequest(BaseModel):
     """Request to scan text for canon-worthy statements."""
     text: str
@@ -1203,6 +1311,25 @@ class RunRequest(BaseModel):
     stdin: str = ""
     timeout: int = 30
     force: bool = False
+
+
+# -- Artifact Engine request models ----------------------------------------
+
+class ArtifactCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str
+    kind: str = "text"
+    language: str = ""
+    message_id: str | None = None
+    source: str = "promote"
+
+
+class ArtifactUpdateRequest(BaseModel):
+    content: str
+    title: str | None = None
+    expected_current_version: int | None = Field(default=None, ge=1)
+    source: str = "manual"
+    message_id: str | None = None
 
 
 @app.get("/governor/fiction/characters")
@@ -3595,6 +3722,269 @@ async def dashboard_ui() -> HTMLResponse:
         content=html_path.read_text(encoding="utf-8"),
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
+
+
+# ============================================================================
+# Artifact Engine — response helpers + routes
+# ============================================================================
+
+
+def _artifact_meta_to_dict(meta: Any, *, include_versions: bool = False) -> dict:
+    """Convert ArtifactMeta to dict, optionally including version history."""
+    d: dict[str, Any] = {
+        "id": meta.id,
+        "title": meta.title,
+        "kind": meta.kind,
+        "language": meta.language,
+        "current_version": meta.current_version,
+        "created_at": meta.created_at,
+        "updated_at": meta.updated_at,
+    }
+    if include_versions:
+        d["versions"] = [
+            {
+                "version": v.version,
+                "created_at": v.created_at,
+                "content_hash": v.content_hash,
+                "source": v.source,
+                "message_id": v.message_id,
+            }
+            for v in meta.versions
+        ]
+    return d
+
+
+def _artifact_detail_response(
+    *, meta: Any, content: str, index_version: int
+) -> dict:
+    return {
+        "ok": True,
+        "index_version": index_version,
+        "artifact": _artifact_meta_to_dict(meta, include_versions=True),
+        "content": content,
+    }
+
+
+def _artifact_list_response(
+    *, summaries: list, index_version: int
+) -> dict:
+    return {
+        "ok": True,
+        "index_version": index_version,
+        "artifacts": [
+            {
+                "id": s.id,
+                "title": s.title,
+                "kind": s.kind,
+                "language": s.language,
+                "current_version": s.current_version,
+                "created_at": s.created_at,
+                "updated_at": s.updated_at,
+            }
+            for s in summaries
+        ],
+    }
+
+
+def _artifact_error(
+    *, status_code: int, code: str, message: str, details: dict | None = None
+) -> JSONResponse:
+    body: dict[str, Any] = {
+        "ok": False,
+        "error": {"code": code, "message": message},
+    }
+    if details:
+        body["error"]["details"] = details
+    return JSONResponse(content=body, status_code=status_code)
+
+
+def _artifact_exception_response(exc: Exception) -> JSONResponse:
+    """Map artifact store exceptions to structured JSON error responses."""
+    from gov_webui.artifact_store import (
+        ArtifactContentMissingError,
+        ArtifactNotFoundError,
+        ArtifactValidationError,
+        ArtifactVersionNotFoundError,
+        StaleArtifactVersionError,
+    )
+
+    if isinstance(exc, ArtifactNotFoundError):
+        return _artifact_error(
+            status_code=404,
+            code="artifact_not_found",
+            message=str(exc),
+            details={"artifact_id": exc.artifact_id},
+        )
+    if isinstance(exc, ArtifactVersionNotFoundError):
+        return _artifact_error(
+            status_code=404,
+            code="artifact_version_not_found",
+            message=str(exc),
+            details={"artifact_id": exc.artifact_id, "version": exc.version},
+        )
+    if isinstance(exc, StaleArtifactVersionError):
+        return _artifact_error(
+            status_code=409,
+            code="stale_version",
+            message=str(exc),
+            details={
+                "artifact_id": exc.artifact_id,
+                "expected_current_version": exc.expected_current_version,
+                "current_version": exc.current_version,
+                "index_version": exc.index_version,
+            },
+        )
+    if isinstance(exc, ArtifactValidationError):
+        return _artifact_error(
+            status_code=422,
+            code="validation_error",
+            message=str(exc),
+        )
+    if isinstance(exc, ArtifactContentMissingError):
+        return _artifact_error(
+            status_code=500,
+            code="artifact_content_missing",
+            message=str(exc),
+            details={
+                "artifact_id": exc.artifact_id,
+                "version": exc.version,
+                "path": exc.path,
+            },
+        )
+    # Fallback for unexpected errors
+    return _artifact_error(
+        status_code=500, code="internal_error", message=str(exc)
+    )
+
+
+@app.get("/governor/artifacts")
+async def artifacts_list() -> dict:
+    """List all artifacts (metadata only)."""
+    from gov_webui.artifact_store import ArtifactStoreError
+
+    try:
+        store = _get_artifact_store()
+        summaries, idx_ver = store.list_all()
+        return _artifact_list_response(summaries=summaries, index_version=idx_ver)
+    except ArtifactStoreError as exc:
+        return _artifact_exception_response(exc)
+
+
+@app.post("/governor/artifacts", status_code=201)
+async def artifacts_create(request: ArtifactCreateRequest) -> JSONResponse:
+    """Create a new artifact."""
+    from gov_webui.artifact_store import ArtifactStoreError
+
+    try:
+        store = _get_artifact_store()
+        meta, content, idx_ver = store.create(
+            title=request.title,
+            content=request.content,
+            kind=request.kind,
+            language=request.language,
+            message_id=request.message_id,
+            source=request.source,
+        )
+        return JSONResponse(
+            content=_artifact_detail_response(
+                meta=meta, content=content, index_version=idx_ver
+            ),
+            status_code=201,
+        )
+    except ArtifactStoreError as exc:
+        return _artifact_exception_response(exc)
+
+
+@app.get("/governor/artifacts/state")
+async def artifacts_state() -> dict:
+    """Quick poll endpoint for artifact index version."""
+    from gov_webui.artifact_store import ArtifactStoreError
+
+    try:
+        store = _get_artifact_store()
+        state = store.get_state()
+        return {
+            "ok": True,
+            "index_version": state["version"],
+            "updated_at": state["updated_at"],
+            "count": state["count"],
+        }
+    except ArtifactStoreError as exc:
+        return _artifact_exception_response(exc)
+
+
+@app.get("/governor/artifacts/{artifact_id}")
+async def artifacts_get(artifact_id: str) -> dict:
+    """Get artifact detail + latest content."""
+    from gov_webui.artifact_store import ArtifactStoreError
+
+    try:
+        store = _get_artifact_store()
+        meta, content, idx_ver = store.get(artifact_id)
+        return _artifact_detail_response(
+            meta=meta, content=content, index_version=idx_ver
+        )
+    except ArtifactStoreError as exc:
+        return _artifact_exception_response(exc)
+
+
+@app.put("/governor/artifacts/{artifact_id}")
+async def artifacts_update(
+    artifact_id: str, request: ArtifactUpdateRequest
+) -> dict:
+    """Update artifact content (creates new version)."""
+    from gov_webui.artifact_store import ArtifactStoreError
+
+    try:
+        store = _get_artifact_store()
+        meta, content, idx_ver = store.update(
+            artifact_id,
+            content=request.content,
+            title=request.title,
+            expected_current_version=request.expected_current_version,
+            source=request.source,
+            message_id=request.message_id,
+        )
+        return _artifact_detail_response(
+            meta=meta, content=content, index_version=idx_ver
+        )
+    except ArtifactStoreError as exc:
+        return _artifact_exception_response(exc)
+
+
+@app.delete("/governor/artifacts/{artifact_id}")
+async def artifacts_delete(artifact_id: str) -> dict:
+    """Delete artifact from index."""
+    from gov_webui.artifact_store import ArtifactStoreError
+
+    try:
+        store = _get_artifact_store()
+        _, idx_ver = store.delete(artifact_id)
+        return {
+            "ok": True,
+            "index_version": idx_ver,
+            "deleted": {"artifact_id": artifact_id},
+        }
+    except ArtifactStoreError as exc:
+        return _artifact_exception_response(exc)
+
+
+@app.get("/governor/artifacts/{artifact_id}/version/{version}")
+async def artifacts_get_version(artifact_id: str, version: int) -> dict:
+    """Get content for a specific artifact version."""
+    from gov_webui.artifact_store import ArtifactStoreError
+
+    try:
+        store = _get_artifact_store()
+        content = store.get_version(artifact_id, version)
+        return {
+            "ok": True,
+            "artifact_id": artifact_id,
+            "version": version,
+            "content": content,
+        }
+    except ArtifactStoreError as exc:
+        return _artifact_exception_response(exc)
 
 
 # ============================================================================
