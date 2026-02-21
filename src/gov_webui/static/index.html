@@ -1724,6 +1724,11 @@
         scanForCaptures(item.content, item.bubble);
       });
     }
+
+    // Add promote buttons to all historical assistant bubbles
+    assistantBubbles.forEach(function(item) {
+      addPromoteButton(item.bubble, item.content);
+    });
   }
 
   var _lastUserText = '';
@@ -1908,6 +1913,11 @@
     if ((mode === 'code' || mode === 'research') && content) {
       extractCodeBlocks(content, _lastAssistantBubble);
     }
+
+    // Add promote button with final content (not during streaming)
+    if (_lastAssistantBubble && content) {
+      addPromoteButton(_lastAssistantBubble, content);
+    }
   }
 
   // ========== Artifact Engine ==========
@@ -1916,6 +1926,7 @@
   var _activeArtifactId = null;
   var _artifactDirty = false;
   var _artifactIndexVersion = 0;
+  var _artifactViewingVersion = null;
   var _promotingContent = '';
   var _promotingMessageId = null;
 
@@ -2001,6 +2012,8 @@
       document.getElementById('artifact-content').value = data.content;
       document.getElementById('artifact-version-label').textContent = 'v' + meta.current_version + ' \u00b7 ' + meta.kind;
       document.getElementById('artifact-dirty-badge').classList.add('hidden');
+      document.getElementById('artifact-save-btn').disabled = true;
+      _artifactViewingVersion = meta.current_version;
       renderArtifactVersions(meta.versions || []);
       artifactSwitchTab('edit');
       artifactShowEditorView();
@@ -2027,8 +2040,11 @@
     fetch(BASE + '/governor/artifacts/' + id + '/version/' + version).then(function(r) { return r.json(); }).then(function(data) {
       if (!data.ok) return;
       document.getElementById('artifact-content').value = data.content;
+      _artifactViewingVersion = version;
       _artifactDirty = false;
       document.getElementById('artifact-dirty-badge').classList.add('hidden');
+      document.getElementById('artifact-save-btn').disabled = true;
+      document.getElementById('artifact-version-label').textContent = 'viewing v' + version;
       artifactSwitchTab('edit');
     }).catch(function() {});
   };
@@ -2057,6 +2073,7 @@
   window.artifactMarkDirty = function() {
     _artifactDirty = true;
     document.getElementById('artifact-dirty-badge').classList.remove('hidden');
+    document.getElementById('artifact-save-btn').disabled = false;
   };
 
   window.artifactSave = function() {
@@ -2070,13 +2087,20 @@
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (!data.ok) {
         if (data.error && data.error.code === 'stale_version') {
-          alert('Conflict: artifact was updated elsewhere. Please reload.');
+          var d = data.error.details || {};
+          alert('Version conflict: you had v' + (d.expected_current_version || '?')
+            + ' but the artifact is now v' + (d.current_version || '?')
+            + '. Click the artifact in the list to reload the latest version.');
+        } else {
+          alert('Save failed: ' + (data.error ? data.error.message : 'unknown error'));
         }
         return;
       }
       _artifactDirty = false;
       document.getElementById('artifact-dirty-badge').classList.add('hidden');
+      document.getElementById('artifact-save-btn').disabled = true;
       var meta = data.artifact;
+      _artifactViewingVersion = meta.current_version;
       document.getElementById('artifact-version-label').textContent = 'v' + meta.current_version + ' \u00b7 ' + meta.kind;
       renderArtifactVersions(meta.versions || []);
       artifactRefreshList();
@@ -2168,9 +2192,43 @@
     }).catch(function() {});
   };
 
-  // Add promote buttons to assistant bubbles
+  // beforeunload guard: warn if artifact editor is dirty
+  window.addEventListener('beforeunload', function(e) {
+    if (_artifactDirty) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
+  // Ctrl/Cmd+S to save artifact when editor is focused
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      var editorPane = document.getElementById('artifact-edit-pane');
+      if (_activeArtifactId && editorPane && !editorPane.classList.contains('hidden')) {
+        e.preventDefault();
+        if (_artifactDirty) artifactSave();
+      }
+    }
+  });
+
+  // Artifact polling: refresh list only when panel is visible, list view is shown, and not dirty
+  function artifactPollTick() {
+    var panel = document.getElementById('artifact-panel');
+    if (!panel || panel.classList.contains('hidden')) return;
+    if (_activeArtifactId) return;  // editor is open, skip list refresh
+    if (_artifactDirty) return;
+    // Quick state check before full list fetch
+    fetch(BASE + '/governor/artifacts/state').then(function(r) { return r.json(); }).then(function(data) {
+      if (data.ok && data.index_version !== _artifactIndexVersion) {
+        artifactRefreshList();
+      }
+    }).catch(function() {});
+  }
+  setInterval(artifactPollTick, GOV_REFRESH);
+
+  // Add promote buttons to assistant bubbles (call only with final content)
   function addPromoteButton(bubble, content) {
-    if (bubble.querySelector('.promote-artifact-btn')) return;
+    if (!content || bubble.querySelector('.promote-artifact-btn')) return;
     var btn = document.createElement('button');
     btn.className = 'promote-artifact-btn';
     btn.textContent = 'Promote to artifact';
@@ -2181,16 +2239,6 @@
     };
     bubble.appendChild(btn);
   }
-
-  // Patch addMessage to attach promote buttons on assistant bubbles
-  var _origAddMessage = addMessage;
-  addMessage = function(role, content) {
-    var bubble = _origAddMessage(role, content);
-    if (role === 'assistant') {
-      addPromoteButton(bubble, content);
-    }
-    return bubble;
-  };
 
   // Textarea auto-resize and enter-to-send
   var inputEl = document.getElementById('input');
