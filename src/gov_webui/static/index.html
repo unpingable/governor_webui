@@ -231,6 +231,8 @@
     background: var(--card-bg); overflow-y: auto; font-size: 0.85rem; line-height: 1.6; min-height: 200px; }
   .artifact-editor-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center; }
   .artifact-dirty-badge { font-size: 0.7rem; color: var(--badge-warn); font-weight: 600; }
+  .artifact-style-badge { font-size: 0.7rem; color: var(--badge-ok); font-weight: 600; cursor: help; }
+  .artifact-style-badge.has-corrections { color: var(--badge-warn); }
   .version-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 200px; overflow-y: auto; }
   .version-item { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem;
     padding: 0.3rem 0.5rem; border-radius: 4px; cursor: pointer; }
@@ -936,6 +938,7 @@
       <button class="gov-btn" onclick="artifactDelete()" style="font-size:0.72rem;">Delete</button>
       <button class="gov-btn" onclick="artifactCopyId()" style="font-size:0.72rem;" title="Copy artifact ID">Copy ID</button>
       <span class="artifact-dirty-badge hidden" id="artifact-dirty-badge">unsaved</span>
+      <span class="artifact-style-badge hidden" id="artifact-style-badge"></span>
       <span style="margin-left:auto;font-size:0.7rem;color:var(--muted);" id="artifact-version-label"></span>
     </div>
   </div>
@@ -2236,6 +2239,31 @@
     return d.innerHTML;
   }
 
+  function updateStyleBadge(data) {
+    var badge = document.getElementById('artifact-style-badge');
+    if (!badge) return;
+    var ss = data.style_status;
+    if (!ss) { badge.classList.add('hidden'); return; }
+    var count = ss.correction_count || 0;
+    if (count > 0) {
+      badge.classList.remove('hidden');
+      badge.classList.add('has-corrections');
+      if (ss.action === 'fix' && ss.corrections_applied) {
+        badge.textContent = count + ' style fix' + (count !== 1 ? 'es' : '') + ' applied';
+      } else {
+        badge.textContent = count + ' style issue' + (count !== 1 ? 's' : '');
+      }
+      var details = (data.style_corrections || []).map(function(c) {
+        return c.rule + ': ' + JSON.stringify(c.original) + ' \u2192 ' + JSON.stringify(c.replacement);
+      });
+      badge.title = details.join('\n');
+    } else {
+      badge.classList.remove('hidden', 'has-corrections');
+      badge.textContent = 'style ok';
+      badge.title = ss.profile;
+    }
+  }
+
   window.artifactOpen = function(id) {
     if (_artifactDirty && !confirm('You have unsaved changes. Discard?')) return;
     fetch(BASE + '/governor/artifacts/' + id).then(function(r) { return r.json(); }).then(function(data) {
@@ -2249,6 +2277,7 @@
       document.getElementById('artifact-version-label').textContent = 'v' + meta.current_version + ' \u00b7 ' + meta.kind;
       document.getElementById('artifact-dirty-badge').classList.add('hidden');
       document.getElementById('artifact-save-btn').disabled = true;
+      updateStyleBadge(data);
       _artifactViewingVersion = meta.current_version;
       renderArtifactVersions(meta.versions || []);
       artifactSwitchTab('edit');
@@ -2336,6 +2365,12 @@
       _artifactDirty = false;
       document.getElementById('artifact-dirty-badge').classList.add('hidden');
       document.getElementById('artifact-save-btn').disabled = true;
+      // Sync editor to normalized content after style fixes
+      var ss = data.style_status;
+      if (ss && ss.corrections_applied && data.content != null) {
+        document.getElementById('artifact-content').value = data.content;
+      }
+      updateStyleBadge(data);
       var meta = data.artifact;
       _artifactViewingVersion = meta.current_version;
       document.getElementById('artifact-version-label').textContent = 'v' + meta.current_version + ' \u00b7 ' + meta.kind;

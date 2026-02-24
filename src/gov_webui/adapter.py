@@ -3926,14 +3926,58 @@ def _artifact_meta_to_dict(meta: Any, *, include_versions: bool = False) -> dict
 
 
 def _artifact_detail_response(
-    *, meta: Any, content: str, index_version: int
+    *, meta: Any, content: str, index_version: int,
+    style_corrections: list[dict] | None = None,
+    style_status: dict | None = None,
 ) -> dict:
-    return {
+    resp: dict = {
         "ok": True,
         "index_version": index_version,
         "artifact": _artifact_meta_to_dict(meta, include_versions=True),
         "content": content,
     }
+    if style_status is not None:
+        resp["style_status"] = style_status
+        resp["style_corrections"] = style_corrections or []
+    return resp
+
+
+def _apply_style_policy(content: str) -> tuple[str, list[dict], dict | None]:
+    """Style-check/fix content based on GOVERNOR_MODE.
+
+    Returns (possibly_fixed_content, corrections_list, style_status).
+    style_status is None if mode has no profile.
+    """
+    from gov_webui.style_policy import (
+        action_for_mode,
+        check,
+        corrections_to_dicts,
+        fix,
+        profile_for_mode,
+    )
+
+    profile = profile_for_mode(GOVERNOR_MODE)
+    if profile is None:
+        return content, [], None
+
+    action = action_for_mode(GOVERNOR_MODE)
+    if action == "fix":
+        fixed, corrections = fix(content, profile)
+        return fixed, corrections_to_dicts(corrections), {
+            "profile": profile,
+            "action": action,
+            "corrections_applied": len(corrections) > 0,
+            "correction_count": len(corrections),
+        }
+    else:
+        # warn mode — check only, don't modify
+        corrections = check(content, profile)
+        return content, corrections_to_dicts(corrections), {
+            "profile": profile,
+            "action": action,
+            "corrections_applied": False,
+            "correction_count": len(corrections),
+        }
 
 
 def _artifact_list_response(
@@ -4048,9 +4092,12 @@ async def artifacts_create(request: ArtifactCreateRequest) -> JSONResponse:
 
     try:
         store = _get_artifact_store()
+        styled_content, style_corr, style_status = _apply_style_policy(
+            request.content
+        )
         meta, content, idx_ver = store.create(
             title=request.title,
-            content=request.content,
+            content=styled_content,
             kind=request.kind,
             language=request.language,
             message_id=request.message_id,
@@ -4059,7 +4106,8 @@ async def artifacts_create(request: ArtifactCreateRequest) -> JSONResponse:
         )
         return JSONResponse(
             content=_artifact_detail_response(
-                meta=meta, content=content, index_version=idx_ver
+                meta=meta, content=content, index_version=idx_ver,
+                style_corrections=style_corr, style_status=style_status,
             ),
             status_code=201,
         )
@@ -4093,8 +4141,13 @@ async def artifacts_get(artifact_id: str) -> dict:
     try:
         store = _get_artifact_store()
         meta, content, idx_ver = store.get(artifact_id)
+        # Informational check — never modifies stored content on GET
+        _, style_corr, style_status = _apply_style_policy(content)
+        if style_status is not None:
+            style_status["corrections_applied"] = False
         return _artifact_detail_response(
-            meta=meta, content=content, index_version=idx_ver
+            meta=meta, content=content, index_version=idx_ver,
+            style_corrections=style_corr, style_status=style_status,
         )
     except ArtifactStoreError as exc:
         return _artifact_exception_response(exc)
@@ -4109,9 +4162,12 @@ async def artifacts_update(
 
     try:
         store = _get_artifact_store()
+        styled_content, style_corr, style_status = _apply_style_policy(
+            request.content
+        )
         meta, content, idx_ver = store.update(
             artifact_id,
-            content=request.content,
+            content=styled_content,
             title=request.title,
             expected_current_version=request.expected_current_version,
             source=request.source,
@@ -4119,7 +4175,8 @@ async def artifacts_update(
             source_turn_seq=request.source_turn_seq,
         )
         return _artifact_detail_response(
-            meta=meta, content=content, index_version=idx_ver
+            meta=meta, content=content, index_version=idx_ver,
+            style_corrections=style_corr, style_status=style_status,
         )
     except ArtifactStoreError as exc:
         return _artifact_exception_response(exc)
@@ -4305,6 +4362,21 @@ async def verify_uploaded_receipts(request: Request):
 # ============================================================================
 
 
+def _style_policy_section(mode: str) -> dict | None:
+    """Build style_policy section for effective config, or None."""
+    from gov_webui.style_policy import PROFILES, action_for_mode, profile_for_mode
+
+    profile = profile_for_mode(mode)
+    action = action_for_mode(mode)
+    if profile is None:
+        return None
+    return {
+        "profile": profile,
+        "action": action,
+        "available_profiles": sorted(PROFILES.keys()),
+    }
+
+
 def resolve_effective_config() -> dict:
     """Build the full effective-config response for the current session."""
     mode = GOVERNOR_MODE
@@ -4318,9 +4390,11 @@ def resolve_effective_config() -> dict:
         "context_id": GOVERNOR_CONTEXT_ID,
     }
 
+    style_section = _style_policy_section(mode)
+
     if mode not in _CONFIG_DEFAULTS:
         # Mode without typed config (fiction, nonfiction, general)
-        return {
+        resp = {
             **base,
             "has_config": False,
             "has_session_overrides": False,
@@ -4342,6 +4416,9 @@ def resolve_effective_config() -> dict:
                 "warnings": [],
             },
         }
+        if style_section is not None:
+            resp["style_policy"] = style_section
+        return resp
 
     fields, contract, diagnostics = _resolve_config_fields(mode)
 
@@ -4359,7 +4436,7 @@ def resolve_effective_config() -> dict:
         constraints_hash = full[:16]
         constraints_hash_full = full
 
-    return {
+    resp = {
         **base,
         "has_config": True,
         "has_session_overrides": has_session_overrides,
@@ -4377,6 +4454,9 @@ def resolve_effective_config() -> dict:
         },
         "diagnostics": diagnostics,
     }
+    if style_section is not None:
+        resp["style_policy"] = style_section
+    return resp
 
 
 @app.get("/governor/config/effective")

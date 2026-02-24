@@ -3392,6 +3392,112 @@ def test_artifact_state_returns_count(art_client, fake_artifact_store):
 
 
 # ============================================================================
+# Style Policy Integration Tests
+# ============================================================================
+
+
+def test_artifact_create_fiction_applies_fix(art_client, fake_artifact_store):
+    """In fiction mode (fix), content is normalized and style_status shows applied."""
+    import gov_webui.adapter as adapter_mod
+
+    old_mode = adapter_mod.GOVERNOR_MODE
+    adapter_mod.GOVERNOR_MODE = "fiction"
+    try:
+        resp = art_client.post("/governor/artifacts", json={
+            "title": "Draft", "content": "Hello -- world...", "kind": "text",
+        })
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["ok"] is True
+        # Content should be normalized
+        assert data["content"] == "Hello \u2014 world\u2026"
+        # style_status present
+        ss = data["style_status"]
+        assert ss["profile"] == "fiction_typography_v1"
+        assert ss["action"] == "fix"
+        assert ss["corrections_applied"] is True
+        assert ss["correction_count"] == 2
+        assert len(data["style_corrections"]) == 2
+    finally:
+        adapter_mod.GOVERNOR_MODE = old_mode
+
+
+def test_artifact_create_research_warns_only(art_client, fake_artifact_store):
+    """In research mode (warn), content is unchanged but corrections reported."""
+    import gov_webui.adapter as adapter_mod
+
+    old_mode = adapter_mod.GOVERNOR_MODE
+    adapter_mod.GOVERNOR_MODE = "research"
+    try:
+        resp = art_client.post("/governor/artifacts", json={
+            "title": "Paper", "content": "Hello -- world", "kind": "text",
+        })
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["ok"] is True
+        # Content unchanged in warn mode
+        assert data["content"] == "Hello -- world"
+        ss = data["style_status"]
+        assert ss["action"] == "warn"
+        assert ss["corrections_applied"] is False
+        assert ss["correction_count"] == 1
+    finally:
+        adapter_mod.GOVERNOR_MODE = old_mode
+
+
+def test_artifact_create_code_no_style(art_client, fake_artifact_store):
+    """In code mode, no style policy applies."""
+    import gov_webui.adapter as adapter_mod
+
+    old_mode = adapter_mod.GOVERNOR_MODE
+    adapter_mod.GOVERNOR_MODE = "code"
+    try:
+        resp = art_client.post("/governor/artifacts", json={
+            "title": "Script", "content": "x -- y", "kind": "code",
+        })
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["content"] == "x -- y"
+        assert "style_status" not in data
+        assert "style_corrections" not in data
+    finally:
+        adapter_mod.GOVERNOR_MODE = old_mode
+
+
+def test_effective_config_includes_style():
+    """Fiction mode effective config includes style_policy section."""
+    import importlib
+    import gov_webui.adapter as adapter_mod
+
+    old_mode = adapter_mod.GOVERNOR_MODE
+    adapter_mod.GOVERNOR_MODE = "fiction"
+    try:
+        cfg = adapter_mod.resolve_effective_config()
+        assert "style_policy" in cfg
+        sp = cfg["style_policy"]
+        assert sp["profile"] == "fiction_typography_v1"
+        assert sp["action"] == "fix"
+        assert "fiction_typography_v1" in sp["available_profiles"]
+        assert "research_typography_v1" in sp["available_profiles"]
+    finally:
+        adapter_mod.GOVERNOR_MODE = old_mode
+
+
+def test_effective_config_code_no_style():
+    """Code mode effective config has no style_policy section."""
+    import gov_webui.adapter as adapter_mod
+
+    old_mode = adapter_mod.GOVERNOR_MODE
+    adapter_mod.GOVERNOR_MODE = "code"
+    try:
+        cfg = adapter_mod.resolve_effective_config()
+        assert "style_policy" not in cfg
+    finally:
+        adapter_mod.GOVERNOR_MODE = old_mode
+
+
+# ============================================================================
 # Receipt V1 Export / Verify Tests
 # ============================================================================
 
