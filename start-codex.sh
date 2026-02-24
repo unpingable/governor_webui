@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Auto-detect environment and start Governor WebUI with Codex backend.
+# Auto-detect environment and start Phosphor with Codex backend.
 # Handles snap Docker's $HOME remapping automatically.
 
 cd "$(dirname "$0")"

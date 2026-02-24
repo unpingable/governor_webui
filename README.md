@@ -1,4 +1,4 @@
-# Governor WebUI
+# Phosphor
 
 **The cockpit for governed AI.** Chat with any model — governance happens underneath. Every turn gets a receipt. Every constraint is visible. Nothing writes to canon without proof.
 
@@ -12,7 +12,7 @@ Artifact:  promote draft → revisable artifact with version history
 
 400+ tests. Four backends. The model proposes — the governor constrains — the UI makes it legible.
 
-> *This is the presentation layer for [Agent Governor](https://github.com/unpingable/agent_governor). The governor daemon is the authority. The UI can render state and submit requests, but it cannot override policy, mint receipts, or write to canon.*
+> *Phosphor is the presentation layer for [Agent Governor](https://github.com/unpingable/agent_governor). The governor daemon is the authority. Phosphor can render state and submit requests, but it cannot override policy, mint receipts, or write to canon.*
 
 ---
 
@@ -207,7 +207,7 @@ Switch at runtime via the sidebar dropdown or `POST /v1/backends/switch`.
 
 ## Security Model
 
-The WebUI is a **non-authoritative client**. Governance decisions happen in the daemon.
+Phosphor is a **non-authoritative client**. Governance decisions happen in the daemon.
 
 - The UI cannot sign receipts, broaden scope, or mint keys
 - Set `GOVERNOR_AUTH_TOKEN` to lock mutating endpoints on shared deployments
@@ -277,4 +277,10 @@ npm run screenshots                      # seed + capture golden shots
 - Not an IDE integration (that's the [VS Code extension](https://github.com/unpingable/vscode-governor))
 - Not a place where chat becomes canon by accident
 
-It's a cockpit for a system where language is a proposal and only receipts earn writes.
+## Taxonomy
+
+- **Agent Governor** — governance/provenance daemon (authority)
+- **Guvnah** — status/inspection console (non-authoritative)
+- **Phosphor** — user-facing governed agent client (non-authoritative)
+
+Phosphor is a cockpit for a system where language is a proposal and only receipts earn writes.

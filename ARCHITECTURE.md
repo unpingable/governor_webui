@@ -1,6 +1,6 @@
-# Gov-WebUI Architecture
+# Phosphor Architecture
 
-> Gov-webui is the browser-accessible presentation layer for Agent Governor.
+> Phosphor is the browser-accessible presentation layer for Agent Governor.
 > It serves a self-contained chat + governance UI and an OpenAI-compatible API.
 > It has no authority of its own.
 
@@ -8,7 +8,7 @@
 
 ```
 ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│   Maude     │  │   Guvnah    │  │  gov-webui  │
+│   Maude     │  │   Guvnah    │  │  Phosphor   │
 │ (Python TUI)│  │ (Electron)  │  │  (FastAPI)  │
 └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
        │                │                │
@@ -32,12 +32,12 @@
            Anthropic   Ollama   Claude CLI  Codex CLI
 ```
 
-All three clients share the same daemon contract. Gov-webui is the only one that
+All three clients share the same daemon contract. Phosphor is the only one that
 also imports governor modules directly (for non-chat state queries).
 
 ## Transport: The Split-Brain Architecture
 
-Gov-webui uses a hybrid transport model:
+Phosphor uses a hybrid transport model:
 
 ### Chat path: Daemon via Unix socket
 
@@ -188,7 +188,7 @@ See `agent_gov/docs/DEPLOYMENT.md` for the full systemd setup:
 Key gotcha: `GOVERNOR_SOCKET` must be set explicitly in the systemd unit —
 `XDG_RUNTIME_DIR` is not inherited by systemd services.
 
-## What Gov-WebUI Is NOT
+## What Phosphor Is NOT
 
 - Not an authority — governor is the authority
 - Not a daemon — it's a stateless HTTP adapter

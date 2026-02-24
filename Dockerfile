@@ -1,4 +1,4 @@
-# Governor WebUI
+# Phosphor
 # OpenAI-compatible API with switchable backends and Governor integration
 
 FROM python:3.11-slim

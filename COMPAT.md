@@ -1,10 +1,10 @@
 # Compatibility
 
-This repo is the web UI for Agent Governor.
+Phosphor is the user-facing governed agent client for Agent Governor.
 
 ## Version coupling
 
-gov-webui is independently versioned. It targets Governor contract versions
+Phosphor is independently versioned. It targets Governor contract versions
 listed below, not Governor semver directly.
 
 ## Compatible Governor versions

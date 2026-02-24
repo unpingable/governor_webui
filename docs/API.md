@@ -1,6 +1,6 @@
 # API Reference
 
-Full endpoint reference for gov-webui. All endpoints return JSON unless noted.
+Full endpoint reference for Phosphor. All endpoints return JSON unless noted.
 
 Auth: mutating endpoints (POST/PUT/DELETE/PATCH) require `Authorization: Bearer <token>` when `GOVERNOR_AUTH_TOKEN` is set. Read-only endpoints are always open.
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Governor WebUI: Presentation layer for Agent Governor.
+Phosphor: User-facing governed agent client for Agent Governor.
 
 Serves a combined chat + governor panel at the root URL, and exposes an
 OpenAI-compatible API for external clients. Underneath, it:

@@ -1,4 +1,4 @@
-# Agent Governor WebUI — Codex Backend Override
+# Phosphor — Codex Backend Override
 #
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.codex.yml up --build -d
 #

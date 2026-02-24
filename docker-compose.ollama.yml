@@ -1,4 +1,4 @@
-# Agent Governor WebUI — Ollama Override
+# Phosphor — Ollama Override
 #
 # Use with: docker-compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
 #
