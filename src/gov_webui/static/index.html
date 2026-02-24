@@ -254,6 +254,10 @@
   .promote-hint { font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem; }
   .promote-inline-error { font-size: 0.75rem; color: var(--badge-warn); font-weight: 600;
     margin-top: 0.3rem; display: none; }
+  .artifact-rename-btn { background: none; border: none; cursor: pointer; color: var(--muted);
+    font-size: 0.7rem; padding: 0.1rem 0.25rem; opacity: 0; transition: opacity 0.15s; }
+  .artifact-list-item:hover .artifact-rename-btn { opacity: 1; }
+  .artifact-rename-btn:hover { color: var(--accent); }
 
   /* Config Panel */
   .config-panel { display: flex; flex-direction: column; overflow-y: auto; padding: 1rem; min-height: 0; }
@@ -898,6 +902,10 @@
 
   <!-- List view -->
   <div id="artifact-list-view">
+    <input type="text" id="artifact-filter-input" placeholder="Filter artifacts..."
+      oninput="renderArtifactList()"
+      style="width:100%;padding:0.4rem 0.6rem;margin-bottom:0.5rem;font-size:0.8rem;
+        border:1px solid var(--border);border-radius:6px;background:var(--card-bg);color:var(--fg);">
     <div class="artifact-list" id="artifact-list">
       <div class="empty" id="artifact-empty">No artifacts yet. Promote assistant text or create a new draft.</div>
     </div>
@@ -926,6 +934,7 @@
     <div class="artifact-editor-actions">
       <button class="gov-btn primary" onclick="artifactSave()" id="artifact-save-btn">Save</button>
       <button class="gov-btn" onclick="artifactDelete()" style="font-size:0.72rem;">Delete</button>
+      <button class="gov-btn" onclick="artifactCopyId()" style="font-size:0.72rem;" title="Copy artifact ID">Copy ID</button>
       <span class="artifact-dirty-badge hidden" id="artifact-dirty-badge">unsaved</span>
       <span style="margin-left:auto;font-size:0.7rem;color:var(--muted);" id="artifact-version-label"></span>
     </div>
@@ -2098,21 +2107,43 @@
     }).catch(function() {});
   }
 
+  var _renamingArtifactId = null;
+
   function renderArtifactList() {
     var container = document.getElementById('artifact-list');
     var empty = document.getElementById('artifact-empty');
-    if (_artifactList.length === 0) {
+    var filterInput = document.getElementById('artifact-filter-input');
+    var filterText = (filterInput ? filterInput.value : '').toLowerCase().trim();
+
+    // Hide filter when no artifacts at all
+    if (filterInput) filterInput.style.display = _artifactList.length > 0 ? '' : 'none';
+
+    var filtered = _artifactList;
+    if (filterText) {
+      filtered = _artifactList.filter(function(a) {
+        return (a.title || '').toLowerCase().indexOf(filterText) !== -1
+          || (a.kind || '').toLowerCase().indexOf(filterText) !== -1;
+      });
+    }
+
+    if (filtered.length === 0) {
       container.innerHTML = '';
+      empty.textContent = filterText
+        ? 'No matching artifacts.'
+        : 'No artifacts yet. Promote assistant text or create a new draft.';
       container.appendChild(empty);
       empty.style.display = '';
       return;
     }
     empty.style.display = 'none';
     var html = '';
-    for (var i = 0; i < _artifactList.length; i++) {
-      var a = _artifactList[i];
+    for (var i = 0; i < filtered.length; i++) {
+      var a = filtered[i];
       html += '<div class="artifact-list-item" onclick="artifactOpen(\'' + a.id + '\')">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;">'
         + '<div class="artifact-item-title">' + escHtml(a.title) + '</div>'
+        + '<button class="artifact-rename-btn" onclick="event.stopPropagation();artifactStartRename(\'' + a.id + '\',this)" title="Rename">&#9998;</button>'
+        + '</div>'
         + '<div class="artifact-item-meta">'
         + '<span class="artifact-kind-badge">' + escHtml(a.kind) + '</span>'
         + '<span>v' + a.current_version + '</span>'
@@ -2120,6 +2151,84 @@
     }
     container.innerHTML = html;
   }
+
+  window.artifactStartRename = function(id, btn) {
+    if (_renamingArtifactId) return;
+    var item = btn.closest('.artifact-list-item');
+    var titleEl = item.querySelector('.artifact-item-title');
+    var current = titleEl.textContent;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.value = current;
+    input.style.cssText = 'font-size:0.85rem;font-weight:600;border:none;border-bottom:1px solid var(--accent);background:transparent;color:var(--fg);padding:0;width:100%;outline:none;';
+    var done = false;
+    var finish = function(save) {
+      if (done) return;
+      done = true;
+      var newTitle = input.value.trim();
+      if (save && newTitle && newTitle !== current) {
+        artifactFinishRename(id, newTitle);
+      } else {
+        renderArtifactList();
+      }
+    };
+    input.onkeydown = function(e) {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Escape') finish(false);
+    };
+    input.onblur = function() { finish(true); };
+    titleEl.textContent = '';
+    titleEl.appendChild(input);
+    input.focus();
+    input.select();
+  };
+
+  function artifactFinishRename(id, newTitle) {
+    _renamingArtifactId = id;
+    fetch(BASE + '/governor/artifacts/' + id)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) throw new Error('fetch failed');
+        return fetch(BASE + '/governor/artifacts/' + id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: data.content,
+            title: newTitle,
+            expected_current_version: data.artifact.current_version,
+            source: 'edit',
+          }),
+        });
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _renamingArtifactId = null;
+        if (!data.ok) {
+          if (data.error && data.error.code === 'stale_version') {
+            showToast('Artifact changed \u2014 list refreshed, retry rename', 'error');
+          } else {
+            showToast('Rename failed: ' + (data.error ? data.error.message : 'unknown'), 'error');
+          }
+        } else {
+          showToast('Renamed to \u201c' + newTitle + '\u201d');
+          if (id === _activeArtifactId) {
+            document.getElementById('artifact-title-input').value = newTitle;
+          }
+        }
+        artifactRefreshList();
+      })
+      .catch(function() {
+        _renamingArtifactId = null;
+        showToast('Rename failed', 'error');
+        renderArtifactList();
+      });
+  }
+
+  window.artifactCopyId = function() {
+    if (!_activeArtifactId) return;
+    copyToClipboard(_activeArtifactId);
+  };
 
   function escHtml(s) {
     var d = document.createElement('div');
