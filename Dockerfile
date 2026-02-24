@@ -23,6 +23,9 @@ COPY src/ src/
 # Install the package
 RUN pip install -e .
 
+# Verify all local-only deps are importable (fail build, not first request)
+RUN python3 -c "import governor; import receipt_v1; import gov_webui"
+
 # Entrypoint script: start governor daemon, then uvicorn
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
