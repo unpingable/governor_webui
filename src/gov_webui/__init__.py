@@ -9,4 +9,4 @@ OpenAI-compatible API for external clients. Underneath, it:
 3. Maintains isolated governor contexts per user/project
 """
 
-__version__ = "0.3.0"
+__version__ = "0.5.0"
