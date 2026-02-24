@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import time
@@ -41,7 +42,7 @@ from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from governor.chat_bridge import (
@@ -64,6 +65,8 @@ from gov_webui.summaries import (
     derive_why_feed,
     derive_history_days,
 )
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Configuration from environment
@@ -612,6 +615,7 @@ async def chat_completions(
     turn_id = f"turn-{uuid.uuid4().hex[:12]}"
     receipt = _build_receipt(constraints_msg, contract_meta,
                              request_id, turn_id, _turn_seq, resolved_model)
+    _emit_receipt_v1(receipt)
 
     usage_data = result.get("usage") or {}
     return ChatCompletionResponse(
@@ -652,6 +656,7 @@ async def _stream_via_daemon(
     turn_id = f"turn-{uuid.uuid4().hex[:12]}"
     receipt = _build_receipt(constraints_msg, contract_meta or {},
                              request_id, turn_id, _turn_seq, model)
+    _emit_receipt_v1(receipt)
 
     try:
         # Emit receipt as first chunk (before content)
@@ -1216,6 +1221,70 @@ def _get_artifact_store() -> Any:
         ctx = cm.get_or_create(GOVERNOR_CONTEXT_ID, mode=GOVERNOR_MODE)
         _artifact_store = ArtifactStore(ctx.governor_dir)
     return _artifact_store
+
+
+# ---------- Receipt V1 bridge (dual-emit) ----------
+
+_receipt_v1_bridge: Any = None
+
+
+def _get_receipt_v1_jsonl_path() -> Path:
+    """Canonical path for receipt_v1 JSONL file. Single source of truth."""
+    cm = _get_context_manager()
+    ctx = cm.get_or_create(GOVERNOR_CONTEXT_ID, mode=GOVERNOR_MODE)
+    return Path(ctx.governor_dir) / "receipts" / "receipt_v1.jsonl"
+
+
+def _load_receipt_v1_dicts() -> list[dict]:
+    """Load all receipt_v1 dicts from JSONL in chronological order."""
+    from receipt_v1.store import JsonlStore
+
+    path = _get_receipt_v1_jsonl_path()
+    store = JsonlStore(path)
+    return store._all_dicts_chronological()
+
+
+def _get_receipt_v1_bridge() -> Any:
+    """Lazy-init ReceiptV1Bridge for dual-emit."""
+    global _receipt_v1_bridge
+    if _receipt_v1_bridge is None:
+        from governor.receipt_v1_bridge import ReceiptV1Bridge
+
+        _receipt_v1_bridge = ReceiptV1Bridge(
+            gov_dir=Path(_get_receipt_v1_jsonl_path().parent.parent),
+            enabled=True,
+            deployment_id="webui",
+            fsync=False,
+        )
+    return _receipt_v1_bridge
+
+
+def _emit_receipt_v1(receipt: dict) -> None:
+    """Best-effort dual-emit of a receipt_v1 record alongside adapter receipt.
+
+    Fail-open: logs warnings on failure, never blocks chat.
+    """
+    try:
+        from governor.receipt_v1_bridge import BridgeContext
+
+        bridge = _get_receipt_v1_bridge()
+        bridge.emit(BridgeContext(
+            agent_id="webui",
+            session_id=GOVERNOR_CONTEXT_ID,
+            gate="chat_completion",
+            verdict="pass",
+            reason_human="webui chat turn",
+            tool_args={
+                "config_hash": receipt.get("config_hash"),
+                "constraints_hash": receipt.get("constraints_hash"),
+                "turn_seq": receipt.get("turn_seq"),
+            },
+            args_summary=f"turn {receipt.get('turn_seq', '?')}",
+            execution_status="success",
+            attempt=1,
+        ))
+    except Exception:
+        logger.warning("receipt_v1 dual-emit failed", exc_info=True)
 
 
 class CaptureRequest(BaseModel):
@@ -3985,6 +4054,146 @@ async def artifacts_get_version(artifact_id: str, version: int) -> dict:
         }
     except ArtifactStoreError as exc:
         return _artifact_exception_response(exc)
+
+
+# ============================================================================
+# Receipt V1 Export / Verify Endpoints
+# ============================================================================
+
+
+def _build_verify_report(dicts: list[dict]) -> dict:
+    """Build a verification report from a list of receipt dicts."""
+    from receipt_v1.verify import verify_chain, verify_hash, verify_structure
+
+    if not dicts:
+        return {"ok": True, "report": {
+            "scheme": "receipt_v1",
+            "receipt_count": 0, "valid": True,
+            "error_count": 0, "warning_count": 0,
+            "findings": [],
+            "summary": "No receipts to verify.",
+        }}
+
+    findings: list[dict] = []
+    receipt_version = dicts[0].get("receipt_version", "unknown")
+
+    # 1. Structure check each receipt
+    for i, d in enumerate(dicts):
+        sr = verify_structure(d)
+        for err in sr.errors:
+            findings.append({
+                "level": "error", "code": "structure",
+                "receipt_index": i,
+                "receipt_id": d.get("receipt_id", "?"),
+                "message": err,
+            })
+        for warn in sr.warnings:
+            findings.append({
+                "level": "warning", "code": "structure",
+                "receipt_index": i,
+                "receipt_id": d.get("receipt_id", "?"),
+                "message": warn,
+            })
+
+    # 2. Hash verification each receipt
+    for i, d in enumerate(dicts):
+        hr = verify_hash(d)
+        for err in hr.errors:
+            findings.append({
+                "level": "error", "code": "hash_mismatch",
+                "receipt_index": i,
+                "receipt_id": d.get("receipt_id", "?"),
+                "message": err,
+            })
+
+    # 3. Chain integrity
+    cr = verify_chain(dicts)
+    for err in cr.errors:
+        findings.append({
+            "level": "error", "code": "chain_break",
+            "message": err,
+        })
+    for warn in cr.warnings:
+        findings.append({
+            "level": "warning", "code": "chain_gap",
+            "message": warn,
+        })
+
+    errors = [f for f in findings if f["level"] == "error"]
+    warnings = [f for f in findings if f["level"] == "warning"]
+    valid = len(errors) == 0
+
+    summary_parts = [f"{len(dicts)} receipts"]
+    if valid:
+        summary_parts.append("chain intact")
+    else:
+        summary_parts.append(f"{len(errors)} errors")
+    if warnings:
+        summary_parts.append(f"{len(warnings)} warnings")
+
+    return {"ok": True, "report": {
+        "scheme": "receipt_v1",
+        "receipt_version": receipt_version,
+        "receipt_count": len(dicts),
+        "valid": valid,
+        "error_count": len(errors),
+        "warning_count": len(warnings),
+        "findings": findings,
+        "summary": ", ".join(summary_parts),
+    }}
+
+
+@app.get("/governor/receipts/export")
+async def export_receipt_chain():
+    """Export all receipt_v1 records as canonical JSONL."""
+    dicts = _load_receipt_v1_dicts()
+    if not dicts:
+        return JSONResponse({"ok": False, "error": {"code": "no_receipts",
+                             "message": "No receipts to export"}}, status_code=404)
+    from receipt_v1.canonical import canonical_json
+
+    lines = []
+    for d in dicts:
+        lines.append(canonical_json(d, check_floats=False).decode("utf-8"))
+    content = "\n".join(lines) + "\n"
+    return Response(content=content, media_type="application/x-ndjson",
+                    headers={"Content-Disposition":
+                             'attachment; filename="receipts.jsonl"'})
+
+
+@app.post("/governor/receipts/verify")
+async def verify_receipt_chain():
+    """Verify the integrity of the current on-disk receipt chain."""
+    dicts = _load_receipt_v1_dicts()
+    return _build_verify_report(dicts)
+
+
+@app.post("/governor/receipts/verify-upload")
+async def verify_uploaded_receipts(request: Request):
+    """Verify an uploaded JSONL file's receipt chain integrity."""
+    body = await request.body()
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError as e:
+        return JSONResponse({"ok": False, "error": {
+            "code": "invalid_jsonl",
+            "message": f"Invalid UTF-8: {e}",
+        }}, status_code=400)
+
+    dicts = []
+    for line_num, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            dicts.append(json.loads(line))
+        except json.JSONDecodeError as e:
+            return JSONResponse({"ok": False, "error": {
+                "code": "invalid_jsonl",
+                "message": f"Invalid JSON on line {line_num}: {e}",
+            }}, status_code=400)
+
+    return _build_verify_report(dicts)
 
 
 # ============================================================================

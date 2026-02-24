@@ -478,6 +478,12 @@
       <button class="gov-btn" onclick="exportChatJson()">Chat .json</button>
       <button class="gov-btn" onclick="document.getElementById('import-file').click()">Import Bible</button>
       <input type="file" id="import-file" class="import-file" accept=".json" onchange="importGovernorState(this)">
+      <button class="gov-btn" onclick="exportReceipts()">Receipts .jsonl</button>
+      <button class="gov-btn" onclick="verifyChain()">Verify Chain</button>
+      <label class="gov-btn" style="cursor:pointer">
+        Verify File
+        <input type="file" accept=".jsonl,.ndjson" style="display:none" onchange="verifyUpload(this)">
+      </label>
     </div>
 
     <!-- Fiction Mode Panel -->
@@ -1418,6 +1424,17 @@
     <div class="buttons">
       <button class="gov-btn" onclick="closeModal('promote-artifact-modal')">Cancel</button>
       <button class="gov-btn primary" onclick="submitPromoteArtifact()">Promote</button>
+    </div>
+  </div>
+</div>
+
+<!-- Verify Report Modal -->
+<div class="modal-overlay" id="verify-report-modal">
+  <div class="modal wide">
+    <h3>Verification Report</h3>
+    <div id="verify-report-body"></div>
+    <div class="buttons">
+      <button class="gov-btn" onclick="closeModal('verify-report-modal')">Close</button>
     </div>
   </div>
 </div>
@@ -4975,6 +4992,98 @@
     };
     reader.readAsText(file);
   };
+
+  // ---------- Receipt V1 Export / Verify ----------
+
+  window.exportReceipts = function() {
+    fetch(BASE + '/governor/receipts/export').then(function(r) {
+      if (r.status === 404) {
+        showToast('No receipts to export.', 'warn');
+        return;
+      }
+      if (!r.ok) throw new Error('Export failed: ' + r.status);
+      return r.blob();
+    }).then(function(blob) {
+      if (!blob) return;
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'receipts.jsonl';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }).catch(function(err) {
+      showToast('Receipt export failed: ' + err.message, 'error');
+    });
+  };
+
+  window.verifyChain = function() {
+    fetch(BASE + '/governor/receipts/verify', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) {
+        showToast((data.error && data.error.message) || 'Verify failed', 'error');
+        return;
+      }
+      renderVerifyReport(data.report);
+    }).catch(function(err) {
+      showToast('Verify failed: ' + err.message, 'error');
+    });
+  };
+
+  window.verifyUpload = function(input) {
+    if (!input.files || !input.files[0]) return;
+    var file = input.files[0];
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      fetch(BASE + '/governor/receipts/verify-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: e.target.result
+      }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) {
+          showToast((data.error && data.error.message) || 'Verify failed', 'error');
+          input.value = '';
+          return;
+        }
+        renderVerifyReport(data.report);
+        input.value = '';
+      }).catch(function(err) {
+        showToast('Verify failed: ' + err.message, 'error');
+        input.value = '';
+      });
+    };
+    reader.readAsText(file);
+  };
+
+  function renderVerifyReport(report) {
+    var body = document.getElementById('verify-report-body');
+    var badge = report.valid
+      ? '<span style="color:#28a745;font-weight:bold">VALID</span>'
+      : '<span style="color:#dc3545;font-weight:bold">INVALID</span>';
+    var html = '<p>' + badge + ' &mdash; ' + esc(report.summary) + '</p>';
+    html += '<p style="font-size:0.8rem;color:var(--muted)">Scheme: ' + esc(report.scheme);
+    if (report.receipt_version) html += ' v' + esc(report.receipt_version);
+    html += '</p>';
+    if (report.findings && report.findings.length > 0) {
+      html += '<div style="max-height:300px;overflow-y:auto;margin-top:0.5rem;font-size:0.8rem">';
+      for (var i = 0; i < report.findings.length; i++) {
+        var f = report.findings[i];
+        var color = f.level === 'error' ? '#dc3545' : '#856404';
+        html += '<div style="padding:0.25rem 0;border-bottom:1px solid var(--border)">';
+        html += '<span style="color:' + color + ';font-weight:bold">' + esc(f.level) + '</span>';
+        html += ' [' + esc(f.code) + ']';
+        if (f.receipt_index !== undefined) html += ' #' + f.receipt_index;
+        html += ': ' + esc(f.message);
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    body.innerHTML = html;
+    openModal('verify-report-modal');
+  }
 
   // ========== Init ==========
 

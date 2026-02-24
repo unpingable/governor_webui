@@ -42,6 +42,7 @@ def reset_adapter_globals() -> None:
     adapter_mod._project_store = None
     adapter_mod._research_project_store = None
     adapter_mod._artifact_store = None
+    adapter_mod._receipt_v1_bridge = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
     adapter_mod._pending_research_captures.clear()
@@ -55,6 +56,7 @@ def reset_adapter_globals() -> None:
     adapter_mod._project_store = None
     adapter_mod._research_project_store = None
     adapter_mod._artifact_store = None
+    adapter_mod._receipt_v1_bridge = None
     adapter_mod._pending_captures.clear()
     adapter_mod._capture_counter = 0
     adapter_mod._pending_research_captures.clear()
@@ -3257,3 +3259,171 @@ def test_artifacts_state_endpoint(art_client, fake_artifact_store):
     assert data["count"] == 1
     assert "index_version" in data
     assert "updated_at" in data
+
+
+# ============================================================================
+# Receipt V1 Export / Verify Tests
+# ============================================================================
+
+
+class FakeReceiptV1Bridge:
+    """Stub that captures emit calls without writing files."""
+    def __init__(self):
+        self.enabled = True
+        self.calls = []
+
+    def emit(self, ctx):
+        self.calls.append(ctx)
+        return "fake-receipt-id"
+
+
+@pytest.fixture
+def fake_receipt_bridge(app, monkeypatch):
+    import gov_webui.adapter as adapter_mod
+    fake = FakeReceiptV1Bridge()
+    monkeypatch.setattr(adapter_mod, "_receipt_v1_bridge", fake)
+    return fake
+
+
+def _build_test_receipt_dicts(count: int) -> list[dict]:
+    """Build N chained receipt_v1 dicts for testing."""
+    from receipt_v1 import ReceiptBuilder, ReceiptChain
+    from receipt_v1.types import Action, Actor, ExecutionStatus, Provenance
+
+    chain = ReceiptChain()
+    dicts = []
+    for i in range(count):
+        r = (
+            ReceiptBuilder()
+            .actor(Actor(agent_id="webui", session_id="test-sess"))
+            .tool("gov.chat_completion", {"turn_seq": i + 1})
+            .decision(Action.ALLOW, "gov.passthrough", reason_human="test turn")
+            .execution(ExecutionStatus.SUCCESS)
+            .provenance(Provenance(
+                deployment_id="test",
+                instance_id="test-inst",
+                governor_version="0.1.0",
+            ))
+            .build(chain.next())
+        )
+        chain.append(r)
+        dicts.append(r.to_dict())
+    return dicts
+
+
+def test_receipt_v1_bridge_emits_on_turn(client, fake_receipt_bridge):
+    """Bridge emits on non-streaming chat turn."""
+    import gov_webui.adapter as adapter_mod
+
+    mock = AsyncMock()
+    mock.chat_send = AsyncMock(return_value={
+        "content": "Hello",
+        "model": "test-model",
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        "violations": [],
+        "footer": None,
+        "pending": None,
+    })
+    mock.connect = AsyncMock()
+    mock.close = AsyncMock()
+    adapter_mod._daemon_client = mock
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={"model": "test-model", "messages": [{"role": "user", "content": "Hi"}], "stream": False},
+    )
+    assert response.status_code == 200
+    assert len(fake_receipt_bridge.calls) == 1
+    ctx = fake_receipt_bridge.calls[0]
+    assert ctx.agent_id == "webui"
+    assert ctx.gate == "chat_completion"
+
+
+def test_receipt_export_returns_jsonl(client, monkeypatch):
+    """Export endpoint returns JSONL with correct content-type."""
+    import gov_webui.adapter as adapter_mod
+
+    dicts = _build_test_receipt_dicts(2)
+    monkeypatch.setattr(adapter_mod, "_load_receipt_v1_dicts", lambda: dicts)
+
+    resp = client.get("/governor/receipts/export")
+    assert resp.status_code == 200
+    assert "application/x-ndjson" in resp.headers["content-type"]
+    lines = [l for l in resp.text.strip().split("\n") if l.strip()]
+    assert len(lines) == 2
+    for line in lines:
+        parsed = json.loads(line)
+        assert "receipt_id" in parsed
+
+
+def test_receipt_verify_valid_chain(client, monkeypatch):
+    """Verify reports valid for a properly chained set of receipts."""
+    import gov_webui.adapter as adapter_mod
+
+    dicts = _build_test_receipt_dicts(3)
+    monkeypatch.setattr(adapter_mod, "_load_receipt_v1_dicts", lambda: dicts)
+
+    resp = client.post("/governor/receipts/verify")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    report = data["report"]
+    assert report["valid"] is True
+    assert report["receipt_count"] == 3
+    assert report["error_count"] == 0
+    assert report["scheme"] == "receipt_v1"
+    assert report["receipt_version"] == "1.0"
+
+
+def test_receipt_verify_upload_detects_tampered_hash(client):
+    """Verify-upload detects a tampered receipt_hash."""
+    dicts = _build_test_receipt_dicts(1)
+    dicts[0]["receipt_hash"] = "a" * 64  # tamper
+
+    body = json.dumps(dicts[0]) + "\n"
+    resp = client.post("/governor/receipts/verify-upload", content=body)
+    assert resp.status_code == 200
+    data = resp.json()
+    report = data["report"]
+    assert report["valid"] is False
+    hash_findings = [f for f in report["findings"] if f["code"] == "hash_mismatch"]
+    assert len(hash_findings) >= 1
+
+
+def test_receipt_verify_upload_detects_chain_break(client):
+    """Verify-upload detects a chain break (wrong parent hash)."""
+    dicts = _build_test_receipt_dicts(2)
+    dicts[1]["chain"]["parent_receipt_hash"] = "b" * 64  # break chain
+
+    body = "\n".join(json.dumps(d) for d in dicts) + "\n"
+    resp = client.post("/governor/receipts/verify-upload", content=body)
+    assert resp.status_code == 200
+    data = resp.json()
+    report = data["report"]
+    assert report["valid"] is False
+    chain_findings = [f for f in report["findings"] if f["code"] == "chain_break"]
+    assert len(chain_findings) >= 1
+
+
+def test_receipt_export_empty_returns_404(client, monkeypatch):
+    """Export returns 404 when no receipts exist."""
+    import gov_webui.adapter as adapter_mod
+
+    monkeypatch.setattr(adapter_mod, "_load_receipt_v1_dicts", lambda: [])
+
+    resp = client.get("/governor/receipts/export")
+    assert resp.status_code == 404
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["error"]["code"] == "no_receipts"
+
+
+def test_receipt_verify_upload_invalid_jsonl_returns_400(client):
+    """Verify-upload returns 400 with line number for bad JSON."""
+    body = '{"valid": true}\nnot valid json\n'
+    resp = client.post("/governor/receipts/verify-upload", content=body)
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["error"]["code"] == "invalid_jsonl"
+    assert "line 2" in data["error"]["message"]
