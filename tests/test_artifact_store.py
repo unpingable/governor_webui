@@ -253,3 +253,83 @@ def test_promote_source_provenance(store):
     meta2, _, _ = store.get(meta.id)
     assert meta2.versions[0].source == "promote"
     assert meta2.versions[0].message_id == "msg-abc-123"
+
+
+# ------------------------------------------------------------------
+# 14. source_turn_seq round-trip
+# ------------------------------------------------------------------
+
+def test_source_turn_seq_round_trip(store):
+    """Create with source_turn_seq → read back → field present. Without → None."""
+    meta, _, _ = store.create(
+        title="With Turn",
+        content="turn content",
+        kind="text",
+        language="",
+        source="promote",
+        source_turn_seq=5,
+    )
+    assert meta.versions[0].source_turn_seq == 5
+
+    # Reload from disk
+    meta2, _, _ = store.get(meta.id)
+    assert meta2.versions[0].source_turn_seq == 5
+
+    # Update with source_turn_seq
+    meta3, _, _ = store.update(meta.id, content="v2", source_turn_seq=10)
+    assert meta3.versions[1].source_turn_seq == 10
+
+    # Create without source_turn_seq → None
+    meta4, _, _ = store.create(title="No Turn", content="x", kind="text", language="")
+    assert meta4.versions[0].source_turn_seq is None
+
+
+# ------------------------------------------------------------------
+# 15. source_turn_seq missing on old versions (backward compat)
+# ------------------------------------------------------------------
+
+def test_source_turn_seq_missing_on_old_versions(tmp_path):
+    """Index entries written without source_turn_seq field load as None."""
+    import json
+
+    store = ArtifactStore(tmp_path)
+    index_path = tmp_path / ".governor" / "artifacts" / "index.json"
+
+    # Write an index entry manually without source_turn_seq
+    index_data = {
+        "version": 2,
+        "updated_at": "2025-01-01T00:00:00+00:00",
+        "artifacts": {
+            "old123456ab": {
+                "id": "old123456ab",
+                "title": "Legacy",
+                "kind": "text",
+                "language": "",
+                "current_version": 1,
+                "versions": [
+                    {
+                        "version": 1,
+                        "created_at": "2025-01-01T00:00:00+00:00",
+                        "content_hash": "abcdef0123456789",
+                        "source": "manual",
+                        "message_id": None,
+                        # No source_turn_seq field at all
+                    }
+                ],
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "updated_at": "2025-01-01T00:00:00+00:00",
+            }
+        },
+    }
+    index_path.write_text(json.dumps(index_data))
+
+    # Write content file
+    content_dir = tmp_path / ".governor" / "artifacts" / "content" / "old123456ab"
+    content_dir.mkdir(parents=True, exist_ok=True)
+    (content_dir / "v1.txt").write_text("legacy content")
+
+    # Reload store and read — should not crash, field defaults to None
+    store2 = ArtifactStore(tmp_path)
+    meta, content, _ = store2.get("old123456ab")
+    assert meta.versions[0].source_turn_seq is None
+    assert content == "legacy content"

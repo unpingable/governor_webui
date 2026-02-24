@@ -97,6 +97,7 @@ class ArtifactVersion(BaseModel):
     content_hash: str  # SHA256 hex[:16]
     source: str = "manual"  # "promote" | "manual" | "edit"
     message_id: str | None = None
+    source_turn_seq: int | None = None
 
 
 class ArtifactMeta(BaseModel):
@@ -265,6 +266,7 @@ class ArtifactStore:
         language: str = "",
         message_id: str | None = None,
         source: str = "manual",
+        source_turn_seq: int | None = None,
     ) -> tuple[ArtifactMeta, str, int]:
         """Create a new artifact. Returns (meta, content, index_version)."""
         # 1. Validate
@@ -283,6 +285,7 @@ class ArtifactStore:
             content_hash=chash,
             source=source,
             message_id=message_id,
+            source_turn_seq=source_turn_seq,
         )
         meta = ArtifactMeta(
             id=artifact_id,
@@ -319,6 +322,7 @@ class ArtifactStore:
         expected_current_version: int | None = None,
         source: str = "manual",
         message_id: str | None = None,
+        source_turn_seq: int | None = None,
     ) -> tuple[ArtifactMeta, str, int]:
         """Update an artifact, creating a new version. Returns (meta, content, index_version)."""
         self._validate_source(source)
@@ -354,6 +358,7 @@ class ArtifactStore:
                 content_hash=chash,
                 source=source,
                 message_id=message_id,
+                source_turn_seq=source_turn_seq,
             )
 
             # Mutate in-memory metadata

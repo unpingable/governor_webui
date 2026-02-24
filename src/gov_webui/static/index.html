@@ -240,6 +240,46 @@
     font-size: 0.68rem; border: 1px solid var(--border); border-radius: 12px; background: var(--card-bg);
     color: var(--muted); cursor: pointer; }
   .promote-artifact-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .artifact-count-badge { display: inline-flex; align-items: center; justify-content: center;
+    min-width: 1.1rem; height: 1.1rem; padding: 0 0.3rem; margin-left: 0.3rem;
+    border-radius: 99px; font-size: 0.6rem; font-weight: 700;
+    background: var(--accent); color: #fff; vertical-align: middle; }
+  .promote-target-radio { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.75rem; }
+  .promote-target-radio label { display: flex; align-items: center; gap: 0.4rem;
+    font-size: 0.85rem; cursor: pointer; }
+  .promote-target-radio input[type="radio"] { margin: 0; }
+  .promote-revise-select { width: 100%; padding: 0.4rem; margin-top: 0.3rem;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+    color: var(--fg); font-size: 0.8rem; }
+  .promote-hint { font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem; }
+  .promote-inline-error { font-size: 0.75rem; color: var(--badge-warn); font-weight: 600;
+    margin-top: 0.3rem; display: none; }
+
+  /* Config Panel */
+  .config-panel { display: flex; flex-direction: column; overflow-y: auto; padding: 1rem; min-height: 0; }
+  .config-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.4rem; }
+  .config-panel-header h2 { font-size: 1rem; font-weight: 600; }
+  .config-meta-bar { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; align-items: center; }
+  .config-meta-badge { display: inline-block; padding: 0.15rem 0.45rem; border-radius: 4px;
+    font-size: 0.65rem; font-weight: 600; font-family: 'SF Mono', Menlo, Consolas, monospace;
+    background: var(--code-bg); color: var(--muted); border: 1px solid var(--border); cursor: default; }
+  .config-meta-badge.mode { background: var(--accent-light); color: var(--accent); }
+  .config-meta-badge.copyable { cursor: pointer; }
+  .config-meta-badge.copyable:hover { border-color: var(--accent); }
+  .config-field-row { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.3rem 0;
+    border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+  .config-field-key { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.75rem;
+    min-width: 110px; color: var(--fg); font-weight: 500; }
+  .config-field-value { flex: 1; word-break: break-word; }
+  .config-source-badge { display: inline-block; padding: 0.1rem 0.35rem; border-radius: 3px;
+    font-size: 0.6rem; font-weight: 600; text-transform: uppercase; }
+  .config-source-badge.source-default { background: var(--code-bg); color: var(--muted); }
+  .config-source-badge.source-session { background: var(--accent-light); color: var(--accent); }
+  .config-source-badge.source-system { background: #fef3c7; color: #92400e; }
+  .config-source-badge.clamped { outline: 2px solid #f59e0b; outline-offset: 1px; }
+  .config-clamped-detail { font-size: 0.7rem; color: #92400e; font-style: italic; }
+  .config-fields-list { display: flex; flex-direction: column; }
+  .config-no-config { padding: 2rem 1rem; text-align: center; color: var(--muted); font-size: 0.85rem; }
 
   /* Sidebar toggle for mobile */
   .sidebar-toggle { display: none; position: fixed; bottom: 1rem; right: 1rem; width: 48px; height: 48px; border-radius: 50%; background: var(--accent); color: #fff; border: none; font-size: 1.2rem; cursor: pointer; z-index: 50; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
@@ -256,6 +296,8 @@
     .governor-panel.open { display: flex; }
     .artifact-panel { display: none; position: fixed; top: 0; right: 0; bottom: 0; width: 340px; background: var(--bg); z-index: 60; border-left: 1px solid var(--border); box-shadow: -4px 0 20px rgba(0,0,0,0.1); }
     .artifact-panel.open { display: flex; }
+    .config-panel { display: none; position: fixed; top: 0; right: 0; bottom: 0; width: 340px; background: var(--bg); z-index: 60; border-left: 1px solid var(--border); box-shadow: -4px 0 20px rgba(0,0,0,0.1); }
+    .config-panel.open { display: flex; }
     .sidebar-toggle { display: flex; align-items: center; justify-content: center; }
     .chat-panel { border-right: none; }
   }
@@ -270,6 +312,8 @@
     .toast.stale { background: #1e3a5f; color: #93c5fd; border-color: #2563eb; }
     .finding-item { color: #fca5a5; }
     .turn-meta .receipt-badge.strict-on { background: #78350f; color: #fcd34d; }
+    .config-source-badge.source-system { background: #78350f; color: #fcd34d; }
+    .config-clamped-detail { color: #fcd34d; }
   }
 
   /* Welcome state */
@@ -437,7 +481,8 @@
         <button data-val="maker" class="active">Maker</button>
         <button data-val="builder">Builder</button>
       </div>
-      <button class="gov-btn" onclick="showArtifactPanel()" style="font-size:0.72rem;padding:0.2rem 0.5rem;" title="Artifacts">Artifacts</button>
+      <button class="gov-btn" onclick="showArtifactPanel()" style="font-size:0.72rem;padding:0.2rem 0.5rem;" title="Artifacts">Artifacts<span class="artifact-count-badge hidden" id="artifact-count-badge"></span></button>
+      <button class="gov-btn" onclick="showConfigPanel()" data-disclosure="advanced" style="font-size:0.72rem;padding:0.2rem 0.5rem;" title="Current Effective Config">Config</button>
     </div>
 
     <!-- Status Banner -->
@@ -885,6 +930,28 @@
       <span style="margin-left:auto;font-size:0.7rem;color:var(--muted);" id="artifact-version-label"></span>
     </div>
   </div>
+</div>
+
+<!-- Config Panel (C2 — Effective Config) -->
+<div class="config-panel hidden" id="config-panel">
+  <div class="config-panel-header">
+    <h2>Current Effective Config</h2>
+    <div style="display:flex;gap:0.4rem;">
+      <button class="gov-btn" onclick="refreshConfigPanel()" style="font-size:0.72rem;padding:0.2rem 0.5rem;" title="Refresh">Refresh</button>
+      <button class="gov-btn" onclick="copyConfigJson()" style="font-size:0.72rem;padding:0.2rem 0.5rem;" title="Copy JSON">Copy JSON</button>
+      <button class="gov-btn" onclick="hideConfigPanel()" style="font-size:0.72rem;padding:0.2rem 0.5rem;">Back</button>
+    </div>
+  </div>
+  <div class="config-meta-bar" id="config-meta-bar"></div>
+  <div style="margin-bottom:0.5rem;">
+    <label style="font-size:0.72rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" id="config-filter-nondefaults" onchange="configFilterNonDefaults()" style="margin-right:0.25rem;">
+      Non-defaults only
+    </label>
+  </div>
+  <div class="config-fields-list" id="config-fields-list"></div>
+  <div id="config-diagnostics" style="margin-top:0.75rem;"></div>
+  <div id="config-env" style="margin-top:0.5rem;"></div>
 </div>
 
 <!-- Sidebar toggle (mobile) -->
@@ -1405,6 +1472,14 @@
 <div class="modal-overlay" id="promote-artifact-modal">
   <div class="modal">
     <h3>Promote to Artifact</h3>
+    <div class="promote-target-radio">
+      <label><input type="radio" name="promote-target" value="new" checked onchange="promoteTargetChanged()"> New artifact</label>
+      <label><input type="radio" name="promote-target" value="revise" onchange="promoteTargetChanged()"> Revise existing:</label>
+      <select class="promote-revise-select hidden" id="promote-revise-select" onchange="promoteReviseSelected()">
+        <option value="">Select artifact...</option>
+      </select>
+      <div class="promote-hint hidden" id="promote-revise-info"></div>
+    </div>
     <div class="form-group">
       <label>Title</label>
       <input type="text" id="promote-artifact-title" placeholder="Artifact title" maxlength="200">
@@ -1416,11 +1491,13 @@
         <option value="markdown" selected>Markdown</option>
         <option value="code">Code</option>
       </select>
+      <div class="promote-hint hidden" id="promote-kind-hint"></div>
     </div>
     <div class="form-group" id="promote-language-group" style="display:none;">
       <label>Language</label>
       <input type="text" id="promote-artifact-language" placeholder="e.g. python, javascript">
     </div>
+    <div class="promote-inline-error" id="promote-inline-error"></div>
     <div class="buttons">
       <button class="gov-btn" onclick="closeModal('promote-artifact-modal')">Cancel</button>
       <button class="gov-btn primary" onclick="submitPromoteArtifact()">Promote</button>
@@ -1915,6 +1992,11 @@
 
       metaStrip.innerHTML = metaHtml;
       _lastAssistantBubble.parentNode.appendChild(metaStrip);
+
+      // Populate per-bubble turn_seq map for promote provenance
+      if (r.turn_seq && turnId) {
+        _msgTurnSeq[turnId] = r.turn_seq;
+      }
     }
 
     // Capture scan: scan for mode-specific captures
@@ -1946,13 +2028,38 @@
   var _artifactViewingVersion = null;
   var _promotingContent = '';
   var _promotingMessageId = null;
+  var _promotingTurnSeq = null;
+  var _msgTurnSeq = {};  // messageId → turn_seq, populated at receipt render time
+
+  function updateArtifactBadge(count) {
+    var badge = document.getElementById('artifact-count-badge');
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = count;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  }
 
   window.showArtifactPanel = function() {
     document.getElementById('governor-panel').classList.add('hidden');
+    var cp = document.getElementById('config-panel');
+    if (cp) { cp.classList.add('hidden'); cp.classList.remove('open'); }
     var panel = document.getElementById('artifact-panel');
     panel.classList.remove('hidden');
     panel.classList.add('open');
-    artifactRefreshList();
+    artifactRefreshList(function() {
+      // Restore last-opened artifact if still exists
+      if (!_activeArtifactId) {
+        try {
+          var lastId = localStorage.getItem('lastArtifact_' + contextId + '_' + mode);
+          if (lastId && _artifactList.some(function(a) { return a.id === lastId; })) {
+            artifactOpen(lastId);
+          }
+        } catch(e) {}
+      }
+    });
   };
 
   window.hideArtifactPanel = function() {
@@ -1980,12 +2087,14 @@
     ev.style.display = 'flex';
   }
 
-  function artifactRefreshList() {
+  function artifactRefreshList(cb) {
     fetch(BASE + '/governor/artifacts').then(function(r) { return r.json(); }).then(function(data) {
       if (!data.ok) return;
       _artifactList = data.artifacts || [];
       _artifactIndexVersion = data.index_version || 0;
       renderArtifactList();
+      updateArtifactBadge(_artifactList.length);
+      if (cb) cb();
     }).catch(function() {});
   }
 
@@ -2023,6 +2132,7 @@
     fetch(BASE + '/governor/artifacts/' + id).then(function(r) { return r.json(); }).then(function(data) {
       if (!data.ok) return;
       _activeArtifactId = id;
+      try { localStorage.setItem('lastArtifact_' + contextId + '_' + mode, id); } catch(e) {}
       _artifactDirty = false;
       var meta = data.artifact;
       document.getElementById('artifact-title-input').value = meta.title;
@@ -2044,8 +2154,9 @@
     for (var i = versions.length - 1; i >= 0; i--) {
       var v = versions[i];
       var cls = (i === versions.length - 1) ? 'version-item current' : 'version-item';
+      var turnLabel = v.source_turn_seq ? ' turn #' + v.source_turn_seq : '';
       html += '<div class="' + cls + '" onclick="artifactLoadVersion(\'' + _activeArtifactId + '\',' + v.version + ')">'
-        + '<span>v' + v.version + ' <small>(' + v.source + ')</small></span>'
+        + '<span>v' + v.version + ' <small>(' + v.source + turnLabel + ')</small></span>'
         + '<span style="color:var(--muted);font-size:0.65rem;">' + (v.created_at || '').slice(0, 19) + '</span>'
         + '</div>';
     }
@@ -2158,14 +2269,148 @@
     }).catch(function() {});
   };
 
+  // Kind inference — deterministic heuristic, advisory only
+  function inferArtifactKind(content) {
+    if (!content) return 'text';
+    var lines = content.split('\n');
+    var fenced = content.match(/^```/gm);
+    if (fenced && fenced.length >= 2) return 'code';
+    if (lines[0] && /^#!\//.test(lines[0])) return 'code';
+    var mdSignals = 0;
+    if (/^#{1,6}\s/m.test(content)) mdSignals++;
+    if (/^\s*[-*]\s/m.test(content)) mdSignals++;
+    if (/\[.+?\]\(.+?\)/.test(content)) mdSignals++;
+    if (/^\|.+\|$/m.test(content)) mdSignals++;
+    if (mdSignals >= 2) return 'markdown';
+    if (mdSignals >= 1 && lines.length > 3) return 'markdown';
+    return 'text';
+  }
+
+  // Language inference for code: extract lang tag from single fenced block
+  function inferArtifactLanguage(content) {
+    if (!content) return '';
+    var m = content.match(/^```(\w+)\s*$/m);
+    if (m) {
+      // Only if there's exactly one fenced block (open + close)
+      var fences = content.match(/^```/gm);
+      if (fences && fences.length === 2) return m[1];
+    }
+    return '';
+  }
+
   // Promote flow
-  window.promoteToArtifact = function(content, messageId) {
+  window.promoteToArtifact = function(content, messageId, turnSeq) {
     _promotingContent = content;
     _promotingMessageId = messageId || null;
+    _promotingTurnSeq = turnSeq || null;
+
+    // Run kind inference
+    var inferred = inferArtifactKind(content);
+    var inferredLang = inferred === 'code' ? inferArtifactLanguage(content) : '';
+
+    // Reset modal state
     document.getElementById('promote-artifact-title').value = '';
-    document.getElementById('promote-artifact-kind').value = 'markdown';
-    document.getElementById('promote-language-group').style.display = 'none';
-    openModal('promote-artifact-modal');
+    document.getElementById('promote-artifact-kind').value = inferred;
+    document.getElementById('promote-artifact-language').value = inferredLang;
+    document.getElementById('promote-language-group').style.display = inferred === 'code' ? '' : 'none';
+    document.getElementById('promote-inline-error').style.display = 'none';
+    document.getElementById('promote-kind-hint').classList.add('hidden');
+
+    // Set default target: radio buttons
+    var radios = document.querySelectorAll('input[name="promote-target"]');
+    var reviseSelect = document.getElementById('promote-revise-select');
+    var reviseInfo = document.getElementById('promote-revise-info');
+
+    // Ensure artifact list is fresh, then populate dropdown
+    var populateAndShow = function() {
+      // Populate revise dropdown
+      var opts = '<option value="">Select artifact...</option>';
+      _artifactList.forEach(function(a) {
+        opts += '<option value="' + esc(a.id) + '">' + esc(a.title) + ' (v' + a.current_version + ' \u00b7 ' + a.kind + ')</option>';
+      });
+      reviseSelect.innerHTML = opts;
+
+      // Default target selection
+      if (_activeArtifactId && _artifactList.some(function(a) { return a.id === _activeArtifactId; })) {
+        // Pre-select "Revise existing" with active artifact
+        radios[1].checked = true;
+        reviseSelect.classList.remove('hidden');
+        reviseSelect.value = _activeArtifactId;
+        promoteReviseSelected();
+      } else {
+        radios[0].checked = true;
+        reviseSelect.classList.add('hidden');
+        reviseInfo.classList.add('hidden');
+      }
+
+      openModal('promote-artifact-modal');
+    };
+
+    if (_artifactList.length === 0) {
+      artifactRefreshList(populateAndShow);
+    } else {
+      populateAndShow();
+    }
+  };
+
+  // Target radio changed
+  window.promoteTargetChanged = function() {
+    var target = document.querySelector('input[name="promote-target"]:checked').value;
+    var reviseSelect = document.getElementById('promote-revise-select');
+    var reviseInfo = document.getElementById('promote-revise-info');
+    var kindHint = document.getElementById('promote-kind-hint');
+    if (target === 'revise') {
+      reviseSelect.classList.remove('hidden');
+      promoteReviseSelected();
+    } else {
+      reviseSelect.classList.add('hidden');
+      reviseInfo.classList.add('hidden');
+      kindHint.classList.add('hidden');
+      // Reset to inferred values for new artifact
+      var inferred = inferArtifactKind(_promotingContent);
+      var inferredLang = inferred === 'code' ? inferArtifactLanguage(_promotingContent) : '';
+      document.getElementById('promote-artifact-title').value = '';
+      document.getElementById('promote-artifact-kind').value = inferred;
+      document.getElementById('promote-artifact-language').value = inferredLang;
+      document.getElementById('promote-language-group').style.display = inferred === 'code' ? '' : 'none';
+    }
+  };
+
+  // Revise dropdown changed — pre-fill from selected artifact
+  window.promoteReviseSelected = function() {
+    var sel = document.getElementById('promote-revise-select');
+    var reviseInfo = document.getElementById('promote-revise-info');
+    var kindHint = document.getElementById('promote-kind-hint');
+    var selectedId = sel.value;
+    if (!selectedId) {
+      reviseInfo.classList.add('hidden');
+      kindHint.classList.add('hidden');
+      return;
+    }
+    var art = null;
+    for (var i = 0; i < _artifactList.length; i++) {
+      if (_artifactList[i].id === selectedId) { art = _artifactList[i]; break; }
+    }
+    if (!art) return;
+
+    // Pre-fill from artifact (NOT inference)
+    document.getElementById('promote-artifact-title').value = art.title;
+    document.getElementById('promote-artifact-kind').value = art.kind;
+    document.getElementById('promote-artifact-language').value = art.language || '';
+    document.getElementById('promote-language-group').style.display = art.kind === 'code' ? '' : 'none';
+
+    // Show current version info
+    reviseInfo.textContent = 'Current: v' + art.current_version + ' \u00b7 ' + art.kind;
+    reviseInfo.classList.remove('hidden');
+
+    // Show inferred kind hint if different
+    var inferred = inferArtifactKind(_promotingContent);
+    if (inferred !== art.kind) {
+      kindHint.textContent = 'Detected: ' + inferred;
+      kindHint.classList.remove('hidden');
+    } else {
+      kindHint.classList.add('hidden');
+    }
   };
 
   // Show/hide language field based on kind
@@ -2184,29 +2429,90 @@
     if (!title) { alert('Title is required.'); return; }
     var kind = document.getElementById('promote-artifact-kind').value;
     var language = document.getElementById('promote-artifact-language').value.trim();
+    var errorEl = document.getElementById('promote-inline-error');
+    errorEl.style.display = 'none';
 
-    fetch(BASE + '/governor/artifacts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: title,
+    var target = document.querySelector('input[name="promote-target"]:checked').value;
+
+    if (target === 'revise') {
+      // Revise existing artifact path
+      var selectedId = document.getElementById('promote-revise-select').value;
+      if (!selectedId) { alert('Select an artifact to revise.'); return; }
+      var art = null;
+      for (var i = 0; i < _artifactList.length; i++) {
+        if (_artifactList[i].id === selectedId) { art = _artifactList[i]; break; }
+      }
+      if (!art) { alert('Artifact not found. Refresh and try again.'); return; }
+
+      var body = {
         content: _promotingContent,
-        kind: kind,
-        language: language,
+        expected_current_version: art.current_version,
         source: 'promote',
         message_id: _promotingMessageId,
-      }),
-    }).then(function(r) { return r.json(); }).then(function(data) {
-      if (!data.ok) {
-        alert('Failed to create artifact: ' + (data.error ? data.error.message : 'unknown'));
-        return;
-      }
-      closeModal('promote-artifact-modal');
-      _promotingContent = '';
-      _promotingMessageId = null;
-      showArtifactPanel();
-      artifactOpen(data.artifact.id);
-    }).catch(function() {});
+        source_turn_seq: _promotingTurnSeq,
+      };
+      // Only send title if changed
+      if (title !== art.title) body.title = title;
+
+      fetch(BASE + '/governor/artifacts/' + selectedId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) {
+          if (data.error && data.error.code === 'stale_version') {
+            // 409 conflict — refresh list, keep modal open
+            artifactRefreshList(function() {
+              // Re-populate dropdown
+              var opts = '<option value="">Select artifact...</option>';
+              _artifactList.forEach(function(a) {
+                opts += '<option value="' + esc(a.id) + '">' + esc(a.title) + ' (v' + a.current_version + ' \u00b7 ' + a.kind + ')</option>';
+              });
+              document.getElementById('promote-revise-select').innerHTML = opts;
+              document.getElementById('promote-revise-select').value = selectedId;
+              promoteReviseSelected();
+            });
+            errorEl.textContent = 'Version conflict \u2014 refreshed. Click Promote to retry.';
+            errorEl.style.display = 'block';
+            return;
+          }
+          alert('Failed to update artifact: ' + (data.error ? data.error.message : 'unknown'));
+          return;
+        }
+        closeModal('promote-artifact-modal');
+        _promotingContent = '';
+        _promotingMessageId = null;
+        _promotingTurnSeq = null;
+        showArtifactPanel();
+        artifactOpen(data.artifact.id);
+      }).catch(function() {});
+    } else {
+      // New artifact path
+      fetch(BASE + '/governor/artifacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: title,
+          content: _promotingContent,
+          kind: kind,
+          language: language,
+          source: 'promote',
+          message_id: _promotingMessageId,
+          source_turn_seq: _promotingTurnSeq,
+        }),
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) {
+          alert('Failed to create artifact: ' + (data.error ? data.error.message : 'unknown'));
+          return;
+        }
+        closeModal('promote-artifact-modal');
+        _promotingContent = '';
+        _promotingMessageId = null;
+        _promotingTurnSeq = null;
+        showArtifactPanel();
+        artifactOpen(data.artifact.id);
+      }).catch(function() {});
+    }
   };
 
   // beforeunload guard: warn if artifact editor is dirty
@@ -2243,6 +2549,159 @@
   }
   setInterval(artifactPollTick, GOV_REFRESH);
 
+  // ── Config Panel (C2) ──────────────────────────────────────────────────
+  var _configData = null;
+
+  window.showConfigPanel = function() {
+    document.getElementById('governor-panel').classList.add('hidden');
+    var ap = document.getElementById('artifact-panel');
+    if (ap) { ap.classList.add('hidden'); ap.classList.remove('open'); }
+    var panel = document.getElementById('config-panel');
+    panel.classList.remove('hidden');
+    panel.classList.add('open');
+    refreshConfigPanel();
+  };
+
+  window.hideConfigPanel = function() {
+    var panel = document.getElementById('config-panel');
+    panel.classList.add('hidden');
+    panel.classList.remove('open');
+    document.getElementById('governor-panel').classList.remove('hidden');
+  };
+
+  window.refreshConfigPanel = function() {
+    fetch(BASE + '/governor/config/effective').then(function(r) { return r.json(); }).then(function(data) {
+      _configData = data;
+      renderConfigPanel(data);
+    }).catch(function(err) {
+      document.getElementById('config-fields-list').innerHTML =
+        '<div class="config-no-config">Failed to load config.</div>';
+    });
+  };
+
+  function renderConfigPanel(data) {
+    // Meta bar
+    var metaBar = document.getElementById('config-meta-bar');
+    var metaHtml = '<span class="config-meta-badge mode">' + esc(data.mode) + '</span>';
+    if (data.contract_config_hash) {
+      metaHtml += ' <span class="config-meta-badge copyable" title="Contract config hash (stored session): ' + esc(data.contract_config_hash_full || '') +
+        '" onclick="copyToClipboard(\'' + esc(data.contract_config_hash_full || '') + '\')">contract:' +
+        esc(data.contract_config_hash) + '</span>';
+    }
+    if (data.constraints_hash) {
+      metaHtml += ' <span class="config-meta-badge copyable" title="Constraints hash (rendered, includes clamps): ' + esc(data.constraints_hash_full || '') +
+        '" onclick="copyToClipboard(\'' + esc(data.constraints_hash_full || '') + '\')">rendered:' +
+        esc(data.constraints_hash) + '</span>';
+    }
+    metaBar.innerHTML = metaHtml;
+
+    // Fields
+    var list = document.getElementById('config-fields-list');
+    if (!data.has_config) {
+      list.innerHTML = '<div class="config-no-config">No typed config for <strong>' + esc(data.mode) + '</strong> mode.</div>';
+      document.getElementById('config-diagnostics').innerHTML = '';
+      document.getElementById('config-env').innerHTML = '';
+      return;
+    }
+
+    renderConfigFields(data.fields, false);
+
+    // Diagnostics
+    var diagHtml = '';
+    var diag = data.diagnostics || {};
+    var hasDiag = (diag.clamped_fields && diag.clamped_fields.length) ||
+                  (diag.unknown_keys && diag.unknown_keys.length) ||
+                  (diag.warnings && diag.warnings.length);
+    if (hasDiag) {
+      diagHtml += '<details><summary style="font-size:0.75rem;cursor:pointer;color:var(--muted);">Diagnostics</summary>';
+      if (diag.clamped_fields && diag.clamped_fields.length) {
+        diagHtml += '<div style="margin-top:0.3rem;font-size:0.72rem;"><strong>Clamped:</strong><ul style="margin:0.2rem 0 0 1rem;">';
+        diag.clamped_fields.forEach(function(c) {
+          diagHtml += '<li><code>' + esc(c.key) + '</code>: ' +
+            esc(JSON.stringify(c.requested)) + ' &rarr; ' + esc(JSON.stringify(c.effective)) +
+            ' <span class="config-source-badge source-system">system</span></li>';
+        });
+        diagHtml += '</ul></div>';
+      }
+      if (diag.unknown_keys && diag.unknown_keys.length) {
+        diagHtml += '<div style="margin-top:0.3rem;font-size:0.72rem;"><strong>Unknown keys:</strong> <code>' +
+          esc(diag.unknown_keys.join(', ')) + '</code></div>';
+      }
+      if (diag.warnings && diag.warnings.length) {
+        diagHtml += '<div style="margin-top:0.3rem;font-size:0.72rem;"><strong>Warnings:</strong><ul style="margin:0.2rem 0 0 1rem;">';
+        diag.warnings.forEach(function(w) { diagHtml += '<li>' + esc(w) + '</li>'; });
+        diagHtml += '</ul></div>';
+      }
+      diagHtml += '</details>';
+    }
+    document.getElementById('config-diagnostics').innerHTML = diagHtml;
+
+    // Environment
+    var envHtml = '';
+    if (data.env) {
+      envHtml = '<details><summary style="font-size:0.75rem;cursor:pointer;color:var(--muted);">Environment</summary>';
+      envHtml += '<div style="margin-top:0.3rem;font-size:0.72rem;">';
+      Object.keys(data.env).forEach(function(k) {
+        envHtml += '<div><code>' + esc(k) + '</code>: ' + esc(String(data.env[k])) + '</div>';
+      });
+      envHtml += '</div></details>';
+    }
+    document.getElementById('config-env').innerHTML = envHtml;
+  }
+
+  function renderConfigFields(fields, nonDefaultsOnly) {
+    var list = document.getElementById('config-fields-list');
+    // Build clamp lookup from diagnostics
+    var clampMap = {};
+    if (_configData && _configData.diagnostics && _configData.diagnostics.clamped_fields) {
+      _configData.diagnostics.clamped_fields.forEach(function(c) { clampMap[c.key] = c; });
+    }
+    var html = '';
+    fields.forEach(function(f) {
+      if (nonDefaultsOnly && f.source === 'default' && !f.clamped) return;
+      var valStr = (f.value === null || f.value === undefined) ? 'null' :
+        (typeof f.value === 'object' ? JSON.stringify(f.value) : String(f.value));
+      var badgeClass = 'config-source-badge source-' + f.source + (f.clamped ? ' clamped' : '');
+      html += '<div class="config-field-row">';
+      html += '<span class="config-field-key">' + esc(f.key) + '</span>';
+      html += '<span class="config-field-value">' + esc(valStr) + '</span>';
+      html += '<span class="' + badgeClass + '">' + esc(f.source) + '</span>';
+      html += '</div>';
+      if (f.clamped && clampMap[f.key]) {
+        var reqStr = JSON.stringify(clampMap[f.key].requested);
+        html += '<div class="config-clamped-detail" style="padding-left:110px;margin-bottom:0.2rem;">';
+        html += 'requested ' + esc(reqStr) + ' &rarr; clamped to ' + esc(valStr);
+        html += '</div>';
+      }
+    });
+    if (!html) {
+      html = '<div class="config-no-config">All fields at default values.</div>';
+    }
+    list.innerHTML = html;
+  }
+
+  window.configFilterNonDefaults = function() {
+    if (!_configData || !_configData.fields) return;
+    var checked = document.getElementById('config-filter-nondefaults').checked;
+    renderConfigFields(_configData.fields, checked);
+  };
+
+  window.copyConfigJson = function() {
+    if (!_configData) return;
+    var text = JSON.stringify(_configData, null, 2);
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('Copied full config envelope');
+    }).catch(function() {
+      showToast('Copy failed', 'error');
+    });
+  };
+
+  function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('Copied to clipboard');
+    }).catch(function() {});
+  }
+
   // Add promote buttons to assistant bubbles (call only with final content)
   function addPromoteButton(bubble, content) {
     if (!content || bubble.querySelector('.promote-artifact-btn')) return;
@@ -2252,7 +2711,14 @@
     btn.onclick = function(e) {
       e.stopPropagation();
       var msgId = bubble.getAttribute('data-message-id') || '';
-      promoteToArtifact(content, msgId);
+      // Look up per-bubble turn_seq from receipt strip's data-turn-id
+      var turnSeq = null;
+      var metaStrip = bubble.parentNode ? bubble.parentNode.querySelector('.turn-meta') : null;
+      if (metaStrip) {
+        var tid = metaStrip.getAttribute('data-turn-id');
+        if (tid && _msgTurnSeq[tid]) turnSeq = _msgTurnSeq[tid];
+      }
+      promoteToArtifact(content, msgId, turnSeq);
     };
     bubble.appendChild(btn);
   }
@@ -5091,6 +5557,15 @@
   loadBackends();
   refreshGovernor();
   setInterval(refreshGovernor, GOV_REFRESH);
+
+  // Prefetch artifact count for badge (non-blocking, fail-silent)
+  fetch(BASE + '/governor/artifacts/state')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok && data.count > 0) {
+        updateArtifactBadge(data.count);
+      }
+    }).catch(function() {});
 
   // Load backend info and context ID
   fetch(BASE + '/api/info').then(function(r) { return r.json(); }).then(function(data) {

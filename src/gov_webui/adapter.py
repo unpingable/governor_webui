@@ -423,6 +423,106 @@ _LENGTH_BANDS = {
 CONSTRAINTS_FMT_VER = 1
 _turn_seq = 0
 
+# ── Config resolution tables ───────────────────────────────────────────────
+
+_CONFIG_DEFAULTS: dict[str, dict[str, Any]] = {
+    "code": {
+        "artifact_type": None,
+        "length": "medium",
+        "voice": None,
+        "citations": None,
+        "personal_material": None,
+        "format": {},
+        "audience": None,
+        "bans": None,
+        "structure": None,
+        "strict": False,
+    },
+    "research": {
+        "artifact_type": None,
+        "length": "medium",
+        "voice": None,
+        "citations": None,
+        "personal_material": None,
+        "format": {},
+        "audience": None,
+        "bans": None,
+        "structure": None,
+        "strict": False,
+    },
+}
+
+# System hard constraints — override session/default unconditionally.
+# MVP: empty.  Ready for C3 / admin policy.
+_SYSTEM_CONSTRAINTS: dict[str, dict[str, Any]] = {
+    "code": {},
+    "research": {},
+}
+
+
+def _resolve_config_fields(mode: str) -> tuple[list[dict], dict, dict]:
+    """Core config resolution: defaults → session → system clamps.
+
+    Returns ``(fields, contract_dict, diagnostics)``.
+    *fields* is an ordered list of ``{key, value, source, default_value, clamped}``.
+    *contract_dict* is the raw ``state["contract"]`` for hash access.
+    *diagnostics* contains ``clamped_fields``, ``unknown_keys``, ``warnings``.
+    Raises on store read failure (caller handles).
+    """
+    defaults = _CONFIG_DEFAULTS.get(mode, {})
+    system = _SYSTEM_CONSTRAINTS.get(mode, {})
+
+    # ── Read session config from project store ──────────────────────────
+    store = _get_project_store() if mode == "code" else _get_research_project_store()
+    state = store.get_state()
+    contract = state.get("contract", {})
+    session_config = contract.get("config") or {}
+
+    # ── Detect unknown keys ─────────────────────────────────────────────
+    known_keys = set(defaults.keys())
+    unknown_keys = sorted(k for k in session_config if k not in known_keys)
+
+    # ── Merge: defaults → session → system ──────────────────────────────
+    fields: list[dict] = []
+    clamped_fields: list[dict] = []
+
+    for key, default_value in defaults.items():
+        value = default_value
+        source = "default"
+
+        if key in session_config:
+            value = session_config[key]
+            source = "session"
+
+        clamped = False
+        if key in system:
+            requested = value
+            value = system[key]
+            source = "system"
+            if requested != value:
+                clamped = True
+                clamped_fields.append({
+                    "key": key,
+                    "requested": requested,
+                    "effective": value,
+                    "source": "system",
+                })
+
+        fields.append({
+            "key": key,
+            "value": value,
+            "source": source,
+            "default_value": default_value,
+            "clamped": clamped,
+        })
+
+    diagnostics = {
+        "clamped_fields": clamped_fields,
+        "unknown_keys": unknown_keys,
+        "warnings": [],
+    }
+    return fields, contract, diagnostics
+
 
 def _build_constraints_message() -> tuple[dict[str, str] | None, dict]:
     """Build a system message from the active project's config constraints.
@@ -438,57 +538,56 @@ def _build_constraints_message() -> tuple[dict[str, str] | None, dict]:
         return None, _meta_base
 
     try:
-        store = _get_project_store() if mode == "code" else _get_research_project_store()
-        state = store.get_state()
-        contract = state.get("contract", {})
+        fields, contract, _diag = _resolve_config_fields(mode)
     except Exception as e:
         return None, {**_meta_base, "receipt_error": f"store_read_failed: {e}"}
 
     config = contract.get("config")
     if config:
-        # Build typed constraints block from config
+        # Build typed constraints block from RESOLVED values
+        resolved = {f["key"]: f["value"] for f in fields}
         lines = []
         hash_tag = contract.get("config_hash", "")
         hash_full = contract.get("config_hash_full", "")
         lines.append(f"[CONSTRAINTS config_hash={hash_tag}]")
 
-        if config.get("artifact_type"):
-            lines.append(f"artifact_type: {config['artifact_type']}")
+        if resolved.get("artifact_type"):
+            lines.append(f"artifact_type: {resolved['artifact_type']}")
 
-        length = config.get("length", "medium")
+        length = resolved.get("length", "medium")
         lo, hi = _LENGTH_BANDS.get(length, (800, 2000))
         lines.append(f"length_band: {length}")
         lines.append(f"length_min_words: {lo}")
         lines.append(f"length_max_words: {hi}")
 
-        if config.get("voice"):
-            v = config["voice"]
+        if resolved.get("voice"):
+            v = resolved["voice"]
             lines.append(f"voice: {', '.join(v) if isinstance(v, list) else v}")
 
-        if config.get("citations"):
-            lines.append(f"citations: {config['citations']}")
+        if resolved.get("citations"):
+            lines.append(f"citations: {resolved['citations']}")
 
-        if config.get("personal_material"):
-            lines.append(f"personal_material: {config['personal_material']}")
+        if resolved.get("personal_material"):
+            lines.append(f"personal_material: {resolved['personal_material']}")
 
-        fmt = config.get("format", {})
+        fmt = resolved.get("format", {})
         if isinstance(fmt, dict):
             for key in ("tables", "bullets", "headings"):
                 if key in fmt:
                     lines.append(f"format_{key}: {str(fmt[key]).lower()}")
 
-        if config.get("audience"):
-            lines.append(f"audience: {config['audience']}")
+        if resolved.get("audience"):
+            lines.append(f"audience: {resolved['audience']}")
 
-        if config.get("bans"):
-            bans = config["bans"]
+        if resolved.get("bans"):
+            bans = resolved["bans"]
             lines.append(f"bans: {'; '.join(bans) if isinstance(bans, list) else bans}")
 
-        if config.get("structure"):
-            s = config["structure"]
+        if resolved.get("structure"):
+            s = resolved["structure"]
             lines.append(f"structure: {', '.join(s) if isinstance(s, list) else s}")
 
-        strict = config.get("strict", False)
+        strict = resolved.get("strict", False)
         lines.append(f"strict: {str(strict).lower()}")
 
         lines.append("[/CONSTRAINTS]")
@@ -500,7 +599,7 @@ def _build_constraints_message() -> tuple[dict[str, str] | None, dict]:
         }
         return {"role": "system", "content": "\n".join(lines)}, meta
 
-    # Fallback: raw constraints list
+    # Fallback: raw constraints list (legacy, no resolver)
     constraints = contract.get("constraints", [])
     if constraints:
         block = "[CONSTRAINTS]\n" + "\n".join(constraints) + "\n[/CONSTRAINTS]"
@@ -1391,6 +1490,7 @@ class ArtifactCreateRequest(BaseModel):
     language: str = ""
     message_id: str | None = None
     source: str = "promote"
+    source_turn_seq: int | None = None
 
 
 class ArtifactUpdateRequest(BaseModel):
@@ -1399,6 +1499,7 @@ class ArtifactUpdateRequest(BaseModel):
     expected_current_version: int | None = Field(default=None, ge=1)
     source: str = "manual"
     message_id: str | None = None
+    source_turn_seq: int | None = None
 
 
 @app.get("/governor/fiction/characters")
@@ -3817,6 +3918,7 @@ def _artifact_meta_to_dict(meta: Any, *, include_versions: bool = False) -> dict
                 "content_hash": v.content_hash,
                 "source": v.source,
                 "message_id": v.message_id,
+                "source_turn_seq": v.source_turn_seq,
             }
             for v in meta.versions
         ]
@@ -3953,6 +4055,7 @@ async def artifacts_create(request: ArtifactCreateRequest) -> JSONResponse:
             language=request.language,
             message_id=request.message_id,
             source=request.source,
+            source_turn_seq=request.source_turn_seq,
         )
         return JSONResponse(
             content=_artifact_detail_response(
@@ -4013,6 +4116,7 @@ async def artifacts_update(
             expected_current_version=request.expected_current_version,
             source=request.source,
             message_id=request.message_id,
+            source_turn_seq=request.source_turn_seq,
         )
         return _artifact_detail_response(
             meta=meta, content=content, index_version=idx_ver
@@ -4194,6 +4298,98 @@ async def verify_uploaded_receipts(request: Request):
             }}, status_code=400)
 
     return _build_verify_report(dicts)
+
+
+# ============================================================================
+# C2 — Effective Config
+# ============================================================================
+
+
+def resolve_effective_config() -> dict:
+    """Build the full effective-config response for the current session."""
+    mode = GOVERNOR_MODE
+
+    base = {
+        "ok": True,
+        "schema_version": "effective_config_v1",
+        "scope": "session_current",
+        "mode": mode,
+        "backend_type": _current_backend_type,
+        "context_id": GOVERNOR_CONTEXT_ID,
+    }
+
+    if mode not in _CONFIG_DEFAULTS:
+        # Mode without typed config (fiction, nonfiction, general)
+        return {
+            **base,
+            "has_config": False,
+            "has_session_overrides": False,
+            "fields": [],
+            "effective": {},
+            "sources": {},
+            "contract_config_hash": None,
+            "contract_config_hash_full": None,
+            "constraints_hash": None,
+            "constraints_hash_full": None,
+            "env": {
+                "GOVERNOR_MODE": mode,
+                "GOVERNOR_CONTEXT_ID": GOVERNOR_CONTEXT_ID,
+                "BACKEND_TYPE": _current_backend_type,
+            },
+            "diagnostics": {
+                "clamped_fields": [],
+                "unknown_keys": [],
+                "warnings": [],
+            },
+        }
+
+    fields, contract, diagnostics = _resolve_config_fields(mode)
+
+    effective = {f["key"]: f["value"] for f in fields}
+    sources = {f["key"]: f["source"] for f in fields}
+    has_session_overrides = bool(contract.get("config"))
+
+    # Get constraints_hash by calling _build_constraints_message (shared path)
+    constraints_msg, _meta = _build_constraints_message()
+    constraints_hash = None
+    constraints_hash_full = None
+    if constraints_msg:
+        raw = constraints_msg["content"].encode("utf-8")
+        full = hashlib.sha256(raw).hexdigest()
+        constraints_hash = full[:16]
+        constraints_hash_full = full
+
+    return {
+        **base,
+        "has_config": True,
+        "has_session_overrides": has_session_overrides,
+        "fields": fields,
+        "effective": effective,
+        "sources": sources,
+        "contract_config_hash": contract.get("config_hash") or None,
+        "contract_config_hash_full": contract.get("config_hash_full") or None,
+        "constraints_hash": constraints_hash,
+        "constraints_hash_full": constraints_hash_full,
+        "env": {
+            "GOVERNOR_MODE": mode,
+            "GOVERNOR_CONTEXT_ID": GOVERNOR_CONTEXT_ID,
+            "BACKEND_TYPE": _current_backend_type,
+        },
+        "diagnostics": diagnostics,
+    }
+
+
+@app.get("/governor/config/effective")
+async def get_effective_config():
+    """Return the current effective configuration for the active session."""
+    try:
+        return resolve_effective_config()
+    except Exception as e:
+        logger.exception("Failed to resolve effective config")
+        return JSONResponse(
+            {"ok": False, "error": {"code": "store_read_failed", "message": str(e)}},
+            status_code=500,
+        )
 
 
 # ============================================================================

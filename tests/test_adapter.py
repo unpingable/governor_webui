@@ -3030,7 +3030,7 @@ class FakeArtifactStore:
         self._index_version = 1
 
     def create(self, *, title, content, kind="text", language="",
-               message_id=None, source="manual"):
+               message_id=None, source="manual", source_turn_seq=None):
         if kind not in ("text", "markdown", "code"):
             raise self._Validation(f"Invalid kind '{kind}'")
         aid = f"fake{len(self._artifacts):04d}"
@@ -3038,6 +3038,7 @@ class FakeArtifactStore:
         ver = self._Version(
             version=1, created_at=now, content_hash="abcd1234abcd1234",
             source=source, message_id=message_id,
+            source_turn_seq=source_turn_seq,
         )
         meta = self._Meta(
             id=aid, title=title, kind=kind, language=language,
@@ -3048,7 +3049,8 @@ class FakeArtifactStore:
         return meta, content, self._index_version
 
     def update(self, artifact_id, *, content, title=None,
-               expected_current_version=None, source="manual", message_id=None):
+               expected_current_version=None, source="manual", message_id=None,
+               source_turn_seq=None):
         if artifact_id not in self._artifacts:
             raise self._NotFound(artifact_id)
         entry = self._artifacts[artifact_id]
@@ -3064,6 +3066,7 @@ class FakeArtifactStore:
         ver = self._Version(
             version=new_ver, created_at=now, content_hash="efgh5678efgh5678",
             source=source, message_id=message_id,
+            source_turn_seq=source_turn_seq,
         )
         meta.current_version = new_ver
         meta.versions.append(ver)
@@ -3262,6 +3265,133 @@ def test_artifacts_state_endpoint(art_client, fake_artifact_store):
 
 
 # ============================================================================
+# Artifact Phase 2 — source_turn_seq + promote-as-revision
+# ============================================================================
+
+
+def test_artifact_create_with_source_turn_seq(art_client):
+    """POST with source_turn_seq → response version includes it."""
+    resp = art_client.post("/governor/artifacts", json={
+        "title": "Turn Test", "content": "body", "kind": "text",
+        "source": "promote", "source_turn_seq": 3,
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["ok"] is True
+    v = data["artifact"]["versions"][0]
+    assert v["source_turn_seq"] == 3
+
+
+def test_artifact_create_without_source_turn_seq(art_client):
+    """POST without source_turn_seq → field is null in response."""
+    resp = art_client.post("/governor/artifacts", json={
+        "title": "No Turn", "content": "body", "kind": "text",
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    v = data["artifact"]["versions"][0]
+    assert v["source_turn_seq"] is None
+
+
+def test_artifact_update_with_source_turn_seq(art_client, fake_artifact_store):
+    """PUT with source_turn_seq → new version has it."""
+    meta, _, _ = fake_artifact_store.create(title="Upd", content="v1", kind="text")
+    resp = art_client.put(f"/governor/artifacts/{meta.id}", json={
+        "content": "v2 content", "expected_current_version": 1,
+        "source": "promote", "source_turn_seq": 7,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    # Latest version (last in list) should have source_turn_seq
+    latest_v = data["artifact"]["versions"][-1]
+    assert latest_v["source_turn_seq"] == 7
+
+
+def test_artifact_update_preserves_concurrency_with_turn_seq(art_client, fake_artifact_store):
+    """PUT with expected_current_version mismatch → 409, even when source_turn_seq present."""
+    meta, _, _ = fake_artifact_store.create(title="Conc", content="v1", kind="text")
+    fake_artifact_store.update(meta.id, content="v2", expected_current_version=1)
+
+    resp = art_client.put(f"/governor/artifacts/{meta.id}", json={
+        "content": "v3", "expected_current_version": 1,
+        "source": "promote", "source_turn_seq": 5,
+    })
+    assert resp.status_code == 409
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["error"]["code"] == "stale_version"
+
+
+def test_artifact_promote_as_revision_flow(art_client, fake_artifact_store):
+    """Full promote-as-revision: create, then PUT with source=promote + message_id + source_turn_seq."""
+    meta, _, _ = fake_artifact_store.create(
+        title="Original", content="v1", kind="markdown",
+    )
+    resp = art_client.put(f"/governor/artifacts/{meta.id}", json={
+        "content": "revised content",
+        "expected_current_version": 1,
+        "source": "promote",
+        "message_id": "msg-xyz-789",
+        "source_turn_seq": 12,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["artifact"]["current_version"] == 2
+    v2 = data["artifact"]["versions"][-1]
+    assert v2["source"] == "promote"
+    assert v2["message_id"] == "msg-xyz-789"
+    assert v2["source_turn_seq"] == 12
+    assert data["content"] == "revised content"
+
+
+def test_artifact_version_history_includes_turn_seq(art_client, fake_artifact_store):
+    """GET /{id}/version/{v} endpoint — version metadata accessible via parent GET."""
+    meta, _, _ = fake_artifact_store.create(
+        title="Hist", content="v1", kind="text", source_turn_seq=1,
+    )
+    fake_artifact_store.update(
+        meta.id, content="v2", expected_current_version=1,
+        source="promote", source_turn_seq=5,
+    )
+    # Fetch full artifact to see version list
+    resp = art_client.get(f"/governor/artifacts/{meta.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    versions = data["artifact"]["versions"]
+    assert versions[0]["source_turn_seq"] == 1
+    assert versions[1]["source_turn_seq"] == 5
+
+
+def test_artifact_list_unchanged(art_client, fake_artifact_store):
+    """GET /governor/artifacts response shape unchanged — summaries don't include version details."""
+    fake_artifact_store.create(title="A", content="a", kind="text")
+    fake_artifact_store.create(title="B", content="b", kind="markdown")
+    resp = art_client.get("/governor/artifacts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert len(data["artifacts"]) == 2
+    for art in data["artifacts"]:
+        assert "title" in art
+        assert "kind" in art
+        assert "versions" not in art
+        assert "content" not in art
+
+
+def test_artifact_state_returns_count(art_client, fake_artifact_store):
+    """GET /governor/artifacts/state returns count for auto-hydrate badge."""
+    assert art_client.get("/governor/artifacts/state").json()["count"] == 0
+    fake_artifact_store.create(title="X", content="x", kind="text")
+    data = art_client.get("/governor/artifacts/state").json()
+    assert data["ok"] is True
+    assert data["count"] == 1
+    fake_artifact_store.create(title="Y", content="y", kind="text")
+    assert art_client.get("/governor/artifacts/state").json()["count"] == 2
+
+
+# ============================================================================
 # Receipt V1 Export / Verify Tests
 # ============================================================================
 
@@ -3427,3 +3557,240 @@ def test_receipt_verify_upload_invalid_jsonl_returns_400(client):
     assert data["ok"] is False
     assert data["error"]["code"] == "invalid_jsonl"
     assert "line 2" in data["error"]["message"]
+
+
+# ============================================================================
+# Effective Config (C2) Tests
+# ============================================================================
+
+
+def _setup_code_mode(adapter_mod, tmp_contexts_dir, context_id="ec-test"):
+    """Helper: configure adapter for code mode with a fresh context."""
+    adapter_mod._project_store = None
+    adapter_mod._research_project_store = None
+    adapter_mod.GOVERNOR_MODE = "code"
+    adapter_mod.GOVERNOR_CONTEXTS_DIR = str(tmp_contexts_dir)
+    adapter_mod.GOVERNOR_CONTEXT_ID = context_id
+
+    cm = GovernorContextManager(base_dir=tmp_contexts_dir)
+    cm.create(context_id, mode="code")
+    adapter_mod._context_manager = cm
+
+    from fastapi.testclient import TestClient
+    return TestClient(adapter_mod.app, raise_server_exceptions=False)
+
+
+def test_effective_config_defaults_only(tmp_contexts_dir):
+    """Code mode, no contract config → all sources are 'default'."""
+    import gov_webui.adapter as adapter_mod
+    test_client = _setup_code_mode(adapter_mod, tmp_contexts_dir, "ec-defaults")
+
+    # Set contract without config
+    test_client.put("/governor/code/project/contract", json={"description": "test"})
+
+    resp = test_client.get("/governor/config/effective")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["has_config"] is True
+    assert data["has_session_overrides"] is False
+    assert data["scope"] == "session_current"
+
+    # All fields should be source=default
+    for f in data["fields"]:
+        assert f["source"] == "default", f"field {f['key']} should be default"
+        assert f["clamped"] is False
+
+    # Field order matches _CONFIG_DEFAULTS key order
+    expected_keys = list(adapter_mod._CONFIG_DEFAULTS["code"].keys())
+    actual_keys = [f["key"] for f in data["fields"]]
+    assert actual_keys == expected_keys
+
+    adapter_mod._project_store = None
+    adapter_mod._context_manager = None
+
+
+def test_effective_config_session_override(tmp_contexts_dir):
+    """Session override: length='long' → source='session', rest stays 'default'."""
+    import gov_webui.adapter as adapter_mod
+    test_client = _setup_code_mode(adapter_mod, tmp_contexts_dir, "ec-session")
+
+    test_client.put("/governor/code/project/contract", json={
+        "description": "test",
+        "config": {"length": "long"},
+    })
+
+    resp = test_client.get("/governor/config/effective")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["has_session_overrides"] is True
+
+    sources = data["sources"]
+    assert sources["length"] == "session"
+    assert data["effective"]["length"] == "long"
+
+    # Other fields still default
+    for key, src in sources.items():
+        if key != "length":
+            assert src == "default", f"field {key} should be default"
+
+    adapter_mod._project_store = None
+    adapter_mod._context_manager = None
+
+
+def test_effective_config_system_clamp(tmp_contexts_dir, monkeypatch):
+    """System constraint clamps a field: strict forced True despite session False."""
+    import gov_webui.adapter as adapter_mod
+    test_client = _setup_code_mode(adapter_mod, tmp_contexts_dir, "ec-clamp")
+
+    # Monkeypatch system constraints to force strict=True
+    monkeypatch.setitem(adapter_mod._SYSTEM_CONSTRAINTS["code"], "strict", True)
+
+    test_client.put("/governor/code/project/contract", json={
+        "description": "test",
+        "config": {"strict": False},
+    })
+
+    resp = test_client.get("/governor/config/effective")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["effective"]["strict"] is True
+    assert data["sources"]["strict"] == "system"
+
+    # Find the strict field
+    strict_field = [f for f in data["fields"] if f["key"] == "strict"][0]
+    assert strict_field["clamped"] is True
+    assert strict_field["value"] is True
+
+    # Diagnostics should show the clamp
+    clamped = data["diagnostics"]["clamped_fields"]
+    assert len(clamped) == 1
+    assert clamped[0]["key"] == "strict"
+    assert clamped[0]["requested"] is False
+    assert clamped[0]["effective"] is True
+
+    adapter_mod._project_store = None
+    adapter_mod._context_manager = None
+
+
+def test_effective_config_unknown_key(tmp_contexts_dir):
+    """Unknown keys in session config appear in diagnostics, not in fields/effective."""
+    import gov_webui.adapter as adapter_mod
+    test_client = _setup_code_mode(adapter_mod, tmp_contexts_dir, "ec-unknown")
+
+    test_client.put("/governor/code/project/contract", json={
+        "description": "test",
+        "config": {"made_up_key": "x", "length": "short"},
+    })
+
+    resp = test_client.get("/governor/config/effective")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Unknown key NOT in fields or effective
+    field_keys = [f["key"] for f in data["fields"]]
+    assert "made_up_key" not in field_keys
+    assert "made_up_key" not in data["effective"]
+
+    # But IS in diagnostics
+    assert "made_up_key" in data["diagnostics"]["unknown_keys"]
+
+    adapter_mod._project_store = None
+    adapter_mod._context_manager = None
+
+
+def test_effective_config_hash_matches_receipt(tmp_contexts_dir):
+    """contract_config_hash and constraints_hash match receipt values."""
+    import hashlib
+    import gov_webui.adapter as adapter_mod
+    test_client = _setup_code_mode(adapter_mod, tmp_contexts_dir, "ec-hash")
+
+    test_client.put("/governor/code/project/contract", json={
+        "description": "test",
+        "config": {"artifact_type": "tool", "length": "medium", "strict": False},
+    })
+
+    resp = test_client.get("/governor/config/effective")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Build receipt via the same path
+    msg, meta = adapter_mod._build_constraints_message()
+    assert msg is not None
+
+    # contract_config_hash should match receipt's config_hash
+    assert data["contract_config_hash"] == meta["config_hash"]
+    assert data["contract_config_hash_full"] == meta["config_hash_full"]
+
+    # constraints_hash should match SHA-256 of rendered block
+    expected_full = hashlib.sha256(msg["content"].encode("utf-8")).hexdigest()
+    assert data["constraints_hash"] == expected_full[:16]
+    assert data["constraints_hash_full"] == expected_full
+
+    adapter_mod._project_store = None
+    adapter_mod._context_manager = None
+
+
+def test_effective_config_general_mode(client):
+    """General mode → has_config=False, fields=[], hashes=None."""
+    import gov_webui.adapter as adapter_mod
+    adapter_mod.GOVERNOR_MODE = "general"
+
+    resp = client.get("/governor/config/effective")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["has_config"] is False
+    assert data["fields"] == []
+    assert data["contract_config_hash"] is None
+    assert data["constraints_hash"] is None
+    assert data["scope"] == "session_current"
+
+
+def test_effective_config_endpoint_status_codes(tmp_contexts_dir):
+    """200 on success; store failure → 500."""
+    import gov_webui.adapter as adapter_mod
+    test_client = _setup_code_mode(adapter_mod, tmp_contexts_dir, "ec-status")
+
+    # Success case
+    test_client.put("/governor/code/project/contract", json={"description": "test"})
+    resp = test_client.get("/governor/config/effective")
+    assert resp.status_code == 200
+
+    # Simulate store failure by breaking the project store
+    original = adapter_mod._get_project_store
+    adapter_mod._get_project_store = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    adapter_mod._project_store = None
+
+    resp = test_client.get("/governor/config/effective")
+    assert resp.status_code == 500
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["error"]["code"] == "store_read_failed"
+
+    # Restore
+    adapter_mod._get_project_store = original
+    adapter_mod._project_store = None
+    adapter_mod._context_manager = None
+
+
+def test_effective_config_field_order_stable(tmp_contexts_dir):
+    """Field order matches _CONFIG_DEFAULTS key order across multiple calls."""
+    import gov_webui.adapter as adapter_mod
+    test_client = _setup_code_mode(adapter_mod, tmp_contexts_dir, "ec-order")
+
+    test_client.put("/governor/code/project/contract", json={
+        "description": "test",
+        "config": {"strict": True, "length": "long"},
+    })
+
+    expected_keys = list(adapter_mod._CONFIG_DEFAULTS["code"].keys())
+
+    for _ in range(3):
+        resp = test_client.get("/governor/config/effective")
+        assert resp.status_code == 200
+        actual_keys = [f["key"] for f in resp.json()["fields"]]
+        assert actual_keys == expected_keys
+
+    adapter_mod._project_store = None
+    adapter_mod._context_manager = None
