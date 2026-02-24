@@ -9,6 +9,10 @@ WORKDIR /app
 COPY agent-governor/ /tmp/agent-governor/
 RUN pip install --no-cache-dir /tmp/agent-governor/ && rm -rf /tmp/agent-governor/
 
+# Install receipt-v1 from local source (not on PyPI)
+COPY receipt-v1/ /tmp/receipt-v1/
+RUN pip install --no-cache-dir /tmp/receipt-v1/ && rm -rf /tmp/receipt-v1/
+
 # Install dependencies (README.md required by pyproject.toml)
 COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir .

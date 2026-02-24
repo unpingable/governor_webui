@@ -60,6 +60,19 @@ cp "$AGENT_GOV_DIR/README.md" agent-governor/
 cp -r "$AGENT_GOV_DIR/src/governor" agent-governor/src/
 echo "Synced agent-governor from $AGENT_GOV_DIR"
 
+# ── Sync receipt_v1 lib for Docker build ─────────────────────────────────
+# receipt_v1 is not on PyPI — copy source into build context.
+RECEIPT_V1_DIR="$AGENT_GOV_DIR/libs/receipt_v1"
+if [ -d "$RECEIPT_V1_DIR/src/receipt_v1" ]; then
+  rm -rf receipt-v1
+  mkdir -p receipt-v1/src
+  cp "$RECEIPT_V1_DIR/pyproject.toml" receipt-v1/
+  cp -r "$RECEIPT_V1_DIR/src/receipt_v1" receipt-v1/src/
+  echo "Synced receipt-v1 from $RECEIPT_V1_DIR"
+else
+  echo "Warning: receipt_v1 not found at $RECEIPT_V1_DIR — receipt export/verify will 500"
+fi
+
 # ── Write .env for docker-compose ──────────────────────────────────────────
 cat > .env <<EOF
 REAL_HOME=$REAL_HOME

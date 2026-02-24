@@ -8,6 +8,7 @@ build/
 .pytest_cache/
 .env
 agent-governor/
+receipt-v1/
 
 # Claude Code local session data
 .claude/projects/
