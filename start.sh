@@ -3,8 +3,12 @@ set -euo pipefail
 
 # Auto-detect environment and start Phosphor with Claude Code backend.
 # Handles snap Docker's $HOME remapping automatically.
+#
+# Uses the pre-built GHCR image by default. If ../agent_gov exists,
+# syncs local deps and builds from source instead (developer mode).
 
 cd "$(dirname "$0")"
+SCRIPT_DIR="$(pwd)"
 
 # ── Detect real home directory ──────────────────────────────────────────────
 # Snap Docker remaps $HOME inside its sandbox. Use getent to get the truth.
@@ -45,9 +49,19 @@ if [ ! -f "$CREDS" ]; then
   exit 1
 fi
 
-# ── Sync local-only deps into build context ──────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/sync-deps.sh"
+# ── Decide: pre-built image or local build ────────────────────────────────
+BUILD_FLAGS=""
+BUILD_OVERRIDE=""
+AGENT_GOV_DIR="$SCRIPT_DIR/../agent_gov"
+
+if [ -d "$AGENT_GOV_DIR/src/governor" ]; then
+  echo "Found agent_gov — building from source"
+  source "$SCRIPT_DIR/sync-deps.sh"
+  BUILD_FLAGS="--build"
+  BUILD_OVERRIDE="-f docker-compose.build.yml"
+else
+  echo "Using pre-built image from ghcr.io/unpingable/phosphor"
+fi
 
 # ── Write .env for docker-compose ──────────────────────────────────────────
 cat > .env <<EOF
@@ -63,8 +77,9 @@ echo ""
 # ── Start containers ───────────────────────────────────────────────────────
 docker-compose \
   -f docker-compose.yml \
+  $BUILD_OVERRIDE \
   -f docker-compose.claude-code.yml \
-  up --build -d "$@"
+  up $BUILD_FLAGS -d "$@"
 
 echo ""
 echo "Fiction:  http://localhost:8001"

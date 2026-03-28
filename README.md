@@ -14,6 +14,10 @@ Artifact:  promote draft → revisable artifact with version history
 
 > *Phosphor is the presentation layer for [Agent Governor](https://github.com/unpingable/agent_governor). The governor daemon is the authority. Phosphor can render state and submit requests, but it cannot override policy, mint receipts, or write to canon.*
 
+![Research mode — chat with governance sidebar, capture chips, and Why overlay](docs/img/01_research_home.png)
+
+![Dashboard — run overview, regime state, claim metrics (dark mode)](docs/img/02_dashboard.png)
+
 ---
 
 ## What You Get
@@ -161,17 +165,30 @@ The wizard computes a canonical SHA-256 hash of the config. The server always re
 
 ## Try It
 
-### Docker (recommended)
-
-Brings up **three isolated stacks** with persistent state volumes:
+### Quick start (pre-built image)
 
 ```bash
-./start.sh              # Claude Code backend (auto-detects CLI + credentials)
-./start-codex.sh        # Codex backend (auto-detects Node + architecture)
-
-# Or direct:
-docker compose up -d
+docker run -d -p 8000:8000 \
+  -e BACKEND_TYPE=anthropic \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e GOVERNOR_MODE=research \
+  -v phosphor_data:/contexts \
+  ghcr.io/unpingable/phosphor
 ```
+
+Open [http://localhost:8000](http://localhost:8000). That's it.
+
+### Claude Code backend (uses Claude Max, no API key)
+
+Requires [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated.
+
+```bash
+git clone https://github.com/unpingable/governor_webui.git
+cd governor_webui
+./start.sh
+```
+
+`start.sh` auto-detects the CLI, writes `.env`, and brings up three mode-specific stacks:
 
 ```
 Fiction:  http://localhost:8001
@@ -179,14 +196,15 @@ Code:     http://localhost:8002
 Research: http://localhost:8003
 ```
 
-Quick sanity: `curl -s http://localhost:8003/health`
-
-### Local dev
+### Multi-stack (all modes at once)
 
 ```bash
-pip install -e .
-governor-webui          # http://127.0.0.1:8000
+docker compose up -d                                           # Anthropic API
+docker compose -f docker-compose.yml -f docker-compose.claude-code.yml up -d  # Claude Code
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d       # Ollama (local)
 ```
+
+Quick sanity: `curl -s http://localhost:8003/health`
 
 ---
 
@@ -247,18 +265,20 @@ All configuration is env vars.
 
 ## Development
 
+Phosphor depends on [agent-governor](https://github.com/unpingable/agent_governor) and receipt-v1, which are not on PyPI. For local dev, clone the governor repo as a sibling and install both:
+
 ```bash
+# One-time setup
+git clone https://github.com/unpingable/agent_governor.git ../agent_gov
+pip install -e ../agent_gov
+pip install -e ../agent_gov/libs/receipt_v1
 pip install -e ".[dev]"
+
+# Run tests
 python3 -m pytest tests/ -v    # 400+ tests
-```
 
-### Screenshots
-
-`npm run screenshots` regenerates `docs/img/*` via Playwright with seeded fixture state. See `tools/screenshots/` for fixtures and specs.
-
-```bash
-npm install && npx playwright install    # one-time setup
-npm run screenshots                      # seed + capture golden shots
+# Run locally
+governor-webui                 # http://127.0.0.1:8000
 ```
 
 ---

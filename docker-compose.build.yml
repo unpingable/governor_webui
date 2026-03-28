@@ -1,0 +1,27 @@
+# Phosphor — Local Build Override
+#
+# Forces a local image build instead of pulling from GHCR.
+# Requires: ../agent_gov checkout + sync-deps.sh run first.
+#
+# Usage:
+#   SCRIPT_DIR=. source sync-deps.sh
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+
+services:
+  fiction-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: phosphor:local
+
+  code-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: phosphor:local
+
+  research-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: phosphor:local

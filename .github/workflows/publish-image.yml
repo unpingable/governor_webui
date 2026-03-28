@@ -1,0 +1,77 @@
+name: Publish container image
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/phosphor
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout phosphor
+        uses: actions/checkout@v4
+
+      - name: Checkout agent-governor
+        uses: actions/checkout@v4
+        with:
+          repository: unpingable/agent_governor
+          path: _agent_gov
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync local deps into build context
+        run: |
+          # Replicate what sync-deps.sh does, using _agent_gov checkout
+          rm -rf agent-governor receipt-v1
+
+          mkdir -p agent-governor/src
+          cp _agent_gov/pyproject.toml agent-governor/
+          cp _agent_gov/README.md agent-governor/
+          cp -r _agent_gov/src/governor agent-governor/src/
+
+          if [ -d _agent_gov/libs/receipt_v1/src/receipt_v1 ]; then
+            mkdir -p receipt-v1/src
+            cp _agent_gov/libs/receipt_v1/pyproject.toml receipt-v1/
+            cp -r _agent_gov/libs/receipt_v1/src/receipt_v1 receipt-v1/src/
+          fi
+
+          rm -rf _agent_gov
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

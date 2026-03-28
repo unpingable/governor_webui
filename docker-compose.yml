@@ -7,9 +7,15 @@
 #   - Code:     http://localhost:8002
 #   - Research: http://localhost:8003
 #
+# Uses pre-built GHCR image by default. Set PHOSPHOR_IMAGE=local in .env
+# (or run start.sh) to build from source instead.
+#
 # Requires: ANTHROPIC_API_KEY in .env or environment
 #
 # For local Ollama usage instead, see docker-compose.ollama.yml
+
+x-phosphor-image: &phosphor-image
+  image: ${PHOSPHOR_IMAGE:-ghcr.io/unpingable/phosphor:latest}
 
 services:
   # ============================================================
@@ -17,9 +23,7 @@ services:
   # ============================================================
 
   fiction-adapter:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *phosphor-image
     container_name: governor-fiction-adapter
     ports:
       - "8001:8000"
@@ -38,9 +42,7 @@ services:
   # ============================================================
 
   code-adapter:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *phosphor-image
     container_name: governor-code-adapter
     ports:
       - "8002:8000"
@@ -59,9 +61,7 @@ services:
   # ============================================================
 
   research-adapter:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *phosphor-image
     container_name: governor-research-adapter
     ports:
       - "8003:8000"
