@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Governor Desk</title>
+<style>
+  :root {
+    --bg: #fff; --fg: #111; --muted: #666; --border: #ddd;
+    --card-bg: #fafafa; --badge-ok: #22c55e; --badge-warn: #eab308; --badge-block: #ef4444;
+    --accent: #3b82f6; --accent-light: #eff6ff;
+    --code-bg: #f3f4f6; --code-border: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111; --fg: #eee; --muted: #999; --border: #333;
+      --card-bg: #1a1a1a; --accent-light: #1e3a5f;
+      --code-bg: #1e1e1e; --code-border: #333;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.5; height: 100vh; overflow: hidden; }
+
+  .topbar { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); }
+  .topbar h1 { font-size: 1rem; font-weight: 600; }
+  .topbar .version { font-size: 0.7rem; color: var(--muted); }
+  .topbar a { font-size: 0.75rem; color: var(--muted); text-decoration: none; }
+  .topbar a:hover { color: var(--fg); }
+  .topbar .spacer { flex: 1; }
+  .conn { font-size: 0.72rem; color: var(--muted); display: flex; align-items: center; gap: 0.35rem; }
+  .conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .conn .dot.live { background: var(--badge-ok); }
+  .conn .dot.err { background: var(--badge-block); }
+
+  .desk { display: grid; grid-template-columns: 1.2fr 0.8fr 1.4fr; height: calc(100vh - 45px); }
+  .panel { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .panel:last-child { border-right: none; }
+  .panel-header { padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
+  .panel-header .count { font-size: 0.72rem; color: var(--muted); font-weight: 400; }
+  .panel-body { padding: 0.75rem; overflow-y: auto; flex: 1; }
+
+  .empty-state { text-align: center; color: var(--muted); padding: 2rem 1rem; font-size: 0.85rem; }
+
+  .card { border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 0.8rem; margin-bottom: 0.7rem; background: var(--card-bg); }
+  .card.interrupt { border-color: var(--badge-block); }
+  .card.unknown { border-style: dashed; border-color: var(--badge-warn); }
+  .card .head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+  .badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+  .badge.kind { background: var(--accent-light); color: var(--accent); }
+  .badge.urg-blocking, .badge.urg-expiring { background: #fee2e2; color: #991b1b; }
+  .badge.urg-normal, .badge.urg-info { background: var(--card-bg); color: var(--muted); border: 1px solid var(--border); }
+  .badge.warn { background: #fef3c7; color: #92400e; }
+  .card .summary { font-size: 0.85rem; margin-bottom: 0.3rem; }
+  .card .meta { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.5rem; word-break: break-all; }
+  .card .opts { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .btn { padding: 0.35rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.78rem; background: var(--bg); color: var(--fg); }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger { background: var(--badge-block); border-color: var(--badge-block); color: #fff; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .raw { background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 6px; padding: 0.5rem; font-family: 'SF Mono', Menlo, monospace; font-size: 0.72rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin-top: 0.4rem; }
+
+  .sess-item { border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.7rem; margin-bottom: 0.55rem; cursor: pointer; background: var(--card-bg); }
+  .sess-item:hover { border-color: var(--accent); }
+  .sess-item.active { border-color: var(--accent); background: var(--accent-light); }
+  .sess-item .sid { font-size: 0.8rem; font-weight: 500; word-break: break-all; }
+  .sess-item .st { font-size: 0.72rem; color: var(--muted); }
+
+  .diff { background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 6px; padding: 0.6rem; font-family: 'SF Mono', Menlo, monospace; font-size: 0.72rem; overflow-x: auto; white-space: pre; max-height: 45vh; }
+  .diff .add { color: #16a34a; }
+  .diff .del { color: #dc2626; }
+  .promo-actions { display: flex; gap: 0.5rem; margin-top: 0.7rem; }
+  .section-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0.6rem 0 0.35rem; }
+  .toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.8rem; opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 50; }
+  .toast.show { opacity: 0.95; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Governor Desk</h1>
+  <span class="version">operator cockpit</span>
+  <div class="spacer"></div>
+  <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-label">connecting…</span></div>
+  <a href="/" data-testid="nav-chat">Chat</a>
+  <a href="/dashboard" data-testid="nav-dashboard">Dashboard</a>
+</div>
+
+<div class="desk">
+  <!-- Panel 1: Decision queue -->
+  <section class="panel">
+    <div class="panel-header">Decision queue <span class="count" id="dq-count"></span></div>
+    <div class="panel-body" id="dq-body">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </section>
+
+  <!-- Panel 2: Sessions board -->
+  <section class="panel">
+    <div class="panel-header">Sessions <span class="count" id="sess-count"></span></div>
+    <div class="panel-body" id="sess-body">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </section>
+
+  <!-- Panel 3: Promotion panel -->
+  <section class="panel">
+    <div class="panel-header">Promotion <span class="count" id="promo-label"></span></div>
+    <div class="panel-body" id="promo-body">
+      <div class="empty-state">Select a session to inspect its pending promotion.</div>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+// ---- helpers ---------------------------------------------------------------
+function el(tag, attrs, children) {
+  const e = document.createElement(tag);
+  if (attrs) for (const k in attrs) {
+    if (k === "class") e.className = attrs[k];
+    else if (k === "text") e.textContent = attrs[k];
+    else if (k.startsWith("on") && typeof attrs[k] === "function") e.addEventListener(k.slice(2), attrs[k]);
+    else e.setAttribute(k, attrs[k]);
+  }
+  if (children) for (const c of children) e.appendChild(c);
+  return e;
+}
+function esc(s) { return String(s == null ? "" : s); }
+let _toastTimer = null;
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function setConn(state, label) {
+  const dot = document.getElementById("conn-dot");
+  dot.className = "dot" + (state ? " " + state : "");
+  document.getElementById("conn-label").textContent = label;
+}
+async function apiGet(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+async function apiPost(path, body) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body || {}),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const detail = data && data.detail ? data.detail : ("HTTP " + r.status);
+    const err = new Error(detail);
+    err.status = r.status;
+    throw err;
+  }
+  return data;
+}
+
+// ---- Panel 1: Decision queue ----------------------------------------------
+function renderDecisions(items) {
+  const body = document.getElementById("dq-body");
+  document.getElementById("dq-count").textContent = items.length ? items.length : "";
+  body.innerHTML = "";
+  if (!items.length) {
+    body.appendChild(el("div", {class: "empty-state", text: "No pending decisions. The queue is clear."}));
+    return;
+  }
+  for (const it of items) {
+    const cardClass = "card" + (it.is_interrupt ? " interrupt" : "") + (it.is_known_kind ? "" : " unknown");
+    const head = el("div", {class: "head"}, [
+      el("span", {class: "badge kind", text: esc(it.kind)}),
+      el("span", {class: "badge urg-" + esc(it.urgency), text: esc(it.urgency)}),
+    ]);
+    if (!it.is_known_kind) {
+      head.appendChild(el("span", {class: "badge warn", text: "unknown kind"}));
+    }
+    const card = el("div", {class: cardClass}, [
+      head,
+      el("div", {class: "summary", text: esc(it.summary) || "(no summary)"}),
+      el("div", {class: "meta", text: (it.session_ref ? "session " + esc(it.session_ref) + " · " : "") + "id " + esc(it.decision_id)}),
+    ]);
+
+    if (it.is_known_kind) {
+      // Render ONLY the options the daemon listed; each button POSTs the
+      // option's action verbatim. We never synthesise options.
+      const opts = el("div", {class: "opts"});
+      for (const o of (it.options || [])) {
+        const cls = "btn" + (o.action === "approve" ? " primary" : (["deny", "reject", "discard"].includes(o.action) ? " danger" : ""));
+        opts.appendChild(el("button", {
+          class: cls,
+          text: esc(o.label) || esc(o.action),
+          onclick: () => resolveDecision(it, o),
+        }));
+      }
+      if (!(it.options || []).length) {
+        opts.appendChild(el("span", {class: "meta", text: "(no options offered)"}));
+      }
+      card.appendChild(opts);
+    } else {
+      // Unknown kind: never guess options. Show the raw envelope + flag; the
+      // operator inspects it out-of-band. No action buttons are rendered.
+      card.appendChild(el("div", {class: "raw", text: JSON.stringify(it, null, 2)}));
+    }
+    body.appendChild(card);
+  }
+}
+
+async function resolveDecision(item, option) {
+  // args are only what the operator explicitly supplied — never fabricated.
+  // For actions that carry an optional reason, prompt once (empty allowed).
+  const args = {};
+  if (["deny", "reject", "proceed", "revise", "fix", "sustain", "amend", "grant_exception", "dismiss"].includes(option.action)) {
+    const reason = window.prompt("Optional reason for '" + option.action + "':", "");
+    if (reason === null) return; // cancelled
+    if (reason.trim()) args.reason = reason.trim();
+  }
+  try {
+    // The route re-fetches the live feed and refuses a forged action itself;
+    // we still send the action verbatim as the daemon offered it.
+    await apiPost("/desk/decisions/" + encodeURIComponent(item.decision_id) + "/resolve",
+                  {action: option.action, args: args});
+    toast("Resolved: " + option.action);
+    await loadDecisions();
+  } catch (e) {
+    toast("Refused: " + e.message);
+  }
+}
+
+async function loadDecisions() {
+  try {
+    const data = await apiGet("/desk/decisions");
+    renderDecisions(data.items || []);
+  } catch (e) {
+    document.getElementById("dq-body").innerHTML = "";
+    document.getElementById("dq-body").appendChild(
+      el("div", {class: "empty-state", text: "Queue unavailable: " + e.message}));
+  }
+}
+
+// Live updates via SSE /desk/watch. The stream is bounded server-side; when it
+// ends we re-subscribe. On error we back off and fall back to polling.
+let _es = null;
+function startWatch() {
+  try { if (_es) _es.close(); } catch (e) { /* ignore */ }
+  _es = new EventSource("/desk/watch");
+  _es.onopen = () => setConn("live", "live");
+  _es.onmessage = (ev) => {
+    try {
+      const payload = JSON.parse(ev.data);
+      if (payload && payload.error) { setConn("err", "watch error"); return; }
+      if (payload && payload.items) renderDecisions(payload.items);
+    } catch (e) { /* ignore malformed frame */ }
+  };
+  _es.onerror = () => {
+    // EventSource ends when the bounded loop returns; re-subscribe shortly.
+    setConn("", "reconnecting…");
+    try { _es.close(); } catch (e) { /* ignore */ }
+    setTimeout(startWatch, 1500);
+  };
+}
+
+// ---- Panel 2: Sessions board ----------------------------------------------
+let _activeSession = null;
+function renderSessions(sessions) {
+  const body = document.getElementById("sess-body");
+  document.getElementById("sess-count").textContent = sessions.length ? sessions.length : "";
+  body.innerHTML = "";
+  if (!sessions.length) {
+    body.appendChild(el("div", {class: "empty-state", text: "No supervised sessions."}));
+    return;
+  }
+  for (const s of sessions) {
+    const sid = s.session_id || s.id || "(unknown)";
+    const status = s.status || s.state || "";
+    const item = el("div", {
+      class: "sess-item" + (sid === _activeSession ? " active" : ""),
+      onclick: () => selectSession(sid),
+    }, [
+      el("div", {class: "sid", text: esc(sid)}),
+      el("div", {class: "st", text: esc(status)}),
+    ]);
+    body.appendChild(item);
+  }
+}
+
+async function loadSessions() {
+  try {
+    const data = await apiGet("/desk/sessions");
+    renderSessions(data.sessions || []);
+  } catch (e) {
+    document.getElementById("sess-body").innerHTML = "";
+    document.getElementById("sess-body").appendChild(
+      el("div", {class: "empty-state", text: "Sessions unavailable: " + e.message}));
+  }
+}
+
+function selectSession(sid) {
+  _activeSession = sid;
+  loadSessions();       // re-render to highlight
+  loadPromotion(sid);
+}
+
+// ---- Panel 3: Promotion panel ---------------------------------------------
+function colorizeDiff(text) {
+  const container = el("div", {class: "diff"});
+  for (const line of String(text || "").split("\n")) {
+    let cls = "";
+    if (line.startsWith("+") && !line.startsWith("+++")) cls = "add";
+    else if (line.startsWith("-") && !line.startsWith("---")) cls = "del";
+    container.appendChild(el("div", {class: cls, text: line}));
+  }
+  return container;
+}
+
+async function loadPromotion(sid) {
+  const body = document.getElementById("promo-body");
+  document.getElementById("promo-label").textContent = sid ? esc(sid) : "";
+  body.innerHTML = "";
+  body.appendChild(el("div", {class: "empty-state", text: "Loading promotion…"}));
+  let promo = null, diff = null;
+  try {
+    const p = await apiGet("/desk/sessions/" + encodeURIComponent(sid) + "/promotion");
+    promo = p.promotion;
+  } catch (e) {
+    body.innerHTML = "";
+    body.appendChild(el("div", {class: "empty-state", text: "Promotion unavailable: " + e.message}));
+    return;
+  }
+  body.innerHTML = "";
+  if (!promo) {
+    body.appendChild(el("div", {class: "empty-state", text: "No pending promotion for this session."}));
+    return;
+  }
+
+  // Metadata
+  const files = promo.files || promo.changed_files || [];
+  body.appendChild(el("div", {class: "section-label", text: "Changed files (" + files.length + ")"}));
+  if (files.length) {
+    const list = el("div", {});
+    for (const f of files) list.appendChild(el("div", {class: "meta", text: esc(typeof f === "string" ? f : (f.path || JSON.stringify(f)))}));
+    body.appendChild(list);
+  }
+
+  // Diff preview
+  try {
+    diff = await apiGet("/desk/sessions/" + encodeURIComponent(sid) + "/promotion/diff");
+  } catch (e) { diff = null; }
+  body.appendChild(el("div", {class: "section-label", text: "Diff preview"}));
+  const diffText = diff ? (diff.diff || diff.unified || diff.text || "") : "";
+  if (diffText) body.appendChild(colorizeDiff(diffText));
+  else body.appendChild(el("div", {class: "empty-state", text: "(no diff available)"}));
+
+  // Keep / discard
+  const actions = el("div", {class: "promo-actions"}, [
+    el("button", {class: "btn primary", text: "Keep (approve)", onclick: () => resolvePromotion(sid, "approve")}),
+    el("button", {class: "btn danger", text: "Discard (reject)", onclick: () => resolvePromotion(sid, "reject")}),
+  ]);
+  body.appendChild(actions);
+}
+
+async function resolvePromotion(sid, decision) {
+  const args = {};
+  const reason = window.prompt("Optional reason for '" + decision + "':", "");
+  if (reason === null) return;
+  if (reason.trim()) args.reason = reason.trim();
+  try {
+    await apiPost("/desk/sessions/" + encodeURIComponent(sid) + "/promotion/resolve",
+                  {decision: decision, reason: args.reason || null});
+    toast("Promotion " + decision + "d");
+    await loadPromotion(sid);
+    await loadSessions();
+  } catch (e) {
+    toast("Refused: " + e.message);
+  }
+}
+
+// ---- boot ------------------------------------------------------------------
+loadDecisions();
+loadSessions();
+startWatch();
+// Poll fallback (independent of SSE) — cheap, keeps panels fresh.
+setInterval(loadSessions, 5000);
+</script>
+
+</body>
+</html>

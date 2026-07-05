@@ -3146,6 +3146,21 @@ async def root() -> HTMLResponse:
     )
 
 
+@app.get("/desk", response_class=HTMLResponse)
+async def desk_ui() -> HTMLResponse:
+    """Serve the desk-mode operator cockpit (U3-C).
+
+    Three panels — decision queue, sessions board, promotion — all backed by
+    the /desk/* routes (DaemonShellClient over the daemon). Static page, same
+    idiom as /dashboard.
+    """
+    html_path = _STATIC_DIR / "desk.html"
+    return HTMLResponse(
+        content=html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
 # ============================================================================
 # Export / Import
 # ============================================================================
