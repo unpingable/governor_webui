@@ -27,8 +27,8 @@ listed below, not Governor semver directly.
 
 The following daemon RPC methods are part of the governed-shell contract
 (GS-2b/3/4, shell-contract §1-§4). They are present in the daemon as of
-2.8.x but **not yet consumed by Phosphor** — they are the target of the
-U3 desk-mode lane:
+2.8.x and **consumed by Phosphor as of this commit** — the U3 desk-mode lane
+(`/desk` page + `/desk/*` routes over `DaemonShellClient`) is live:
 
 | Method | Kind | Notes |
 |--------|------|-------|
@@ -46,7 +46,13 @@ U3 desk-mode lane:
 | `runtime.promotion.resolve` | mutating | Accept / reject workspace changes |
 
 `DaemonShellClient` (U3-A) wraps these over the same Content-Length
-JSON-RPC framing used by `DaemonChatClient`.
+JSON-RPC framing used by `DaemonChatClient`. The `/desk/*` FastAPI route group
+(U3-B, `desk_adapter.py`) exposes them to the browser; the desk UI (U3-C,
+`/desk`) consumes them. `operator.decisions.resolve` is reached ONLY through
+the one mutation door `POST /desk/decisions/{id}/resolve`, which re-fetches the
+live feed and refuses any action the daemon did not list for that decision
+(defense-in-depth: the daemon re-validates too). The desk routes never import
+`governor.*` — governance authority stays in the daemon.
 
 ## Phase 0 contracts (v0.4.0+)
 

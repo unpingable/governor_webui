@@ -259,7 +259,28 @@ All configuration is env vars.
 |-----|---------|
 | `/` | Chat + governor sidebar |
 | `/dashboard` | Governance dashboard (runs, regime, claims) |
+| `/desk` | Operator desk — decision queue, sessions, promotions |
 | `/governor/ui` | Standalone governor panel |
+
+### Desk mode
+
+`/desk` is the operator cockpit for supervised sessions. Three panels:
+
+- **Decision queue** — the unified operator decision feed
+  (`operator.decisions.list`), refreshed live over a bounded SSE watch
+  (`operator.watch`). Each item is rendered by kind; a decision of an
+  *unknown* kind is shown raw and flagged, never with guessed options.
+- **Sessions board** — supervised sessions (`runtime.session.list`).
+- **Promotion panel** — the selected session's pending workspace changes with
+  a diff preview and keep/discard buttons.
+
+Everything on `/desk` goes through the governor **daemon** via
+`DaemonShellClient` — the webui holds no governance authority of its own. Acting
+on a decision uses the **one mutation door**
+(`POST /desk/decisions/{id}/resolve` → `operator.decisions.resolve`, GS-3):
+the route re-fetches the live feed and refuses any action the daemon did not
+list for that decision, so a forged action never reaches the daemon. The
+routed subsystem's receipt is the record.
 
 ---
 
