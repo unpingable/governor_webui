@@ -31,6 +31,7 @@ The codex backend uses your ChatGPT subscription instead of API credits.
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import logging
 import os
@@ -96,10 +97,18 @@ _current_backend_type: str = BACKEND_TYPE
 # Application setup
 # ============================================================================
 
+def _webui_version() -> str:
+    """Single source of truth for the API version — derived from the package."""
+    try:
+        return importlib.metadata.version("gov-webui")
+    except importlib.metadata.PackageNotFoundError:
+        return "0.5.0"
+
+
 app = FastAPI(
     title="Governor Chat Adapter",
     description="OpenAI-compatible API with switchable backends and Governor integration",
-    version="0.4.0",
+    version=_webui_version(),
 )
 
 app.add_middleware(
@@ -154,7 +163,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    model: str
+    model: str = ""  # optional — default "" matches daemon behaviour
     messages: list[ChatMessage]
     temperature: float = 0.7
     top_p: float = 1.0
@@ -1147,6 +1156,32 @@ async def governor_now() -> dict[str, Any]:
             pass
 
     return now_result
+
+
+@app.get("/api/state")
+async def api_state() -> dict[str, Any]:
+    """Return the full GovernorViewModel (schema v2) for the active context.
+
+    Alias documented in COMPAT.md §Contract versions. Returns the same
+    ViewModel data that /governor/status embeds under the 'viewmodel' key, as
+    a top-level JSON object. Non-chat path — works without a running daemon.
+    Returns an empty ViewModel when no context has been initialised yet.
+    """
+    ctx, context_id = _resolve_context()
+    if ctx is None:
+        # Return an empty shell so callers can distinguish "not initialised"
+        # from a transport error without a 404/503.
+        return {
+            "context_id": context_id,
+            "initialized": False,
+            "viewmodel": None,
+        }
+    vm = _build_vm_for_context(ctx)
+    return {
+        "context_id": ctx.context_id,
+        "initialized": True,
+        "viewmodel": vm.to_dict(),
+    }
 
 
 @app.get("/governor/why")
