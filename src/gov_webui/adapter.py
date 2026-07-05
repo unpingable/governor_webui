@@ -55,6 +55,7 @@ from governor.violation_resolver import (
     format_violation_prompt,
 )
 from gov_webui.daemon_client import DaemonAuthError, DaemonChatClient, default_socket_path
+from gov_webui.desk_adapter import router as desk_router
 from governor.context_manager import GovernorContextManager
 from governor.session_store import ChatSession, SessionMessage, SessionStore
 from governor.viewmodel import build_viewmodel, GovernorViewModel
@@ -118,6 +119,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Desk-mode /desk/* route group (U3-B). Authority stays in the daemon —
+# these routes are a thin transport over DaemonShellClient, never direct
+# governor imports. See desk_adapter.py for the one-mutation-door invariant.
+app.include_router(desk_router)
 
 
 # ============================================================================
