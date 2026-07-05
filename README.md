@@ -276,7 +276,7 @@ All configuration is env vars.
 
 Everything on `/desk` goes through the governor **daemon** via
 `DaemonShellClient` — the webui holds no governance authority of its own. Acting
-on a decision uses the **one mutation door**
+on a queued decision uses the **decision door**
 (`POST /desk/decisions/{id}/resolve` → `operator.decisions.resolve`, GS-3):
 the route re-fetches the live feed and refuses any action the daemon did not
 list for that decision, so a forged action never reaches the daemon. The

@@ -9,8 +9,13 @@ Authority discipline (why this is a separate module, and why it never imports
 Every decision the operator can take is native-backed by the daemon; these
 routes are a thin, auditable transport. Keeping them out of ``adapter.py`` and
 off any direct governor import keeps the authority boundary legible for the
-adversarial pass — the one place a mutation can happen is
-``resolve_decision`` below, and it forwards through ``DaemonShellClient``.
+adversarial pass. THREE routes mutate daemon state: ``resolve_decision``
+(the unified decision door, live-feed re-validated), plus
+``resolve_intervention`` and ``resolve_promotion`` — native-method
+passthroughs at the same trust level as maude's equivalent commands (the
+daemon independently validates each). All three forward through
+``DaemonShellClient``. (Wording corrected per the 2026-07-05 adversarial
+pass, finding F1 — a prior draft claimed a single door.)
 
 The one-mutation-door invariant (governed-shell GS-3, shell-contract §3):
 ``POST /desk/decisions/{id}/resolve`` accepts only ``{action, args}``. The

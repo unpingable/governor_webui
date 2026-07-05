@@ -49,9 +49,12 @@ The following daemon RPC methods are part of the governed-shell contract
 JSON-RPC framing used by `DaemonChatClient`. The `/desk/*` FastAPI route group
 (U3-B, `desk_adapter.py`) exposes them to the browser; the desk UI (U3-C,
 `/desk`) consumes them. `operator.decisions.resolve` is reached ONLY through
-the one mutation door `POST /desk/decisions/{id}/resolve`, which re-fetches the
+the decision door `POST /desk/decisions/{id}/resolve`, which re-fetches the
 live feed and refuses any action the daemon did not list for that decision
-(defense-in-depth: the daemon re-validates too). The desk routes never import
+(defense-in-depth: the daemon re-validates too). Two further mutation routes
+(intervention resolve, promotion resolve) are native-method passthroughs —
+the daemon validates each; they carry the same trust level as maude's
+equivalent commands. The desk routes never import
 `governor.*` — governance authority stays in the daemon.
 
 ## Phase 0 contracts (v0.4.0+)
