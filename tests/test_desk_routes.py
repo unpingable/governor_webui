@@ -179,7 +179,7 @@ class TestListDecisions:
 
 
 # ============================================================================
-# POST /desk/decisions/{id}/resolve — the one mutation door (GS-3)
+# POST /desk/decisions/{id}/resolve — the decision door (GS-3)
 # ============================================================================
 
 

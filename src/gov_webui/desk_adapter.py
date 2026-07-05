@@ -101,7 +101,7 @@ def _reset_shell_client() -> None:
 
 
 class ResolveRequest(BaseModel):
-    """Body for the one mutation door. Only ``action`` + ``args`` — the
+    """Body for the decision door. Only ``action`` + ``args`` — the
     ``decision_id`` is the path parameter, never a body field."""
 
     action: str
@@ -142,7 +142,7 @@ def _raise_transport(exc: Exception) -> None:
 
 
 # ============================================================================
-# operator.decisions.* — the decision feed + the one mutation door
+# operator.decisions.* — the decision feed + the decision door
 # ============================================================================
 
 
@@ -193,7 +193,7 @@ async def list_decisions() -> dict[str, Any]:
 
 @router.post("/decisions/{decision_id}/resolve")
 async def resolve_decision(decision_id: str, req: ResolveRequest) -> dict[str, Any]:
-    """THE one mutation door (governed-shell GS-3, shell-contract §3).
+    """THE decision door (governed-shell GS-3, shell-contract §3).
 
     Contract: accept ``{action, args}``; the ``action`` MUST be one the daemon
     currently lists for THIS ``decision_id``. We re-fetch the live feed and
